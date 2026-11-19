@@ -172,6 +172,9 @@ func normalized(agent string, raw object) object {
 		if id == "" {
 			id = str(obj(claims(str(t["id_token"]))["https://api.openai.com/auth"])["chatgpt_account_id"])
 		}
+		if id == "" {
+			id = str(obj(claims(access)["https://api.openai.com/auth"])["chatgpt_account_id"])
+		}
 		a = object{"type": "oauth", "access": access, "refresh": str(t["refresh_token"]), "expires": number(claims(access)["exp"]) * 1000, "accountId": id, "idToken": str(t["id_token"])}
 	case "copilot":
 		access := str(raw["oauth_token"])
@@ -280,6 +283,9 @@ func importPaths(root, source string, paths activePaths) (map[string]any, error)
 			return nil, errors.New("builtin import belongs to a different source")
 		}
 		for _, old := range previous.Accounts {
+			if str(obj(auth[old.Key])["refreshOwner"]) == "host" {
+				return nil, errors.New("a builtin account has already completed ownership handoff; do not reimport its old credential source")
+			}
 			if digest(auth[old.Key]) != old.ImportedHash {
 				return nil, errors.New("staged builtin credentials changed; sync them before reimporting")
 			}
@@ -362,6 +368,11 @@ func importPaths(root, source string, paths activePaths) (map[string]any, error)
 			return nil, e
 		}
 		if a := normalized("codex", raw); a != nil {
+			if str(a["accountId"]) == "" {
+				return nil, errors.New("active Codex credential has no verifiable account identity")
+			}
+			a["refreshOwner"] = "external"
+			a["sourceAuthFile"] = p
 			var match *Account
 			for key, item := range accounts {
 				if item.Agent == "codex" && ((str(a["accountId"]) != "" && a["accountId"] == values[key]["accountId"]) || tokenHash(a) == tokenHash(values[key])) {
@@ -485,7 +496,11 @@ func importPaths(root, source string, paths activePaths) (map[string]any, error)
 	}
 	var catalog []object
 	enabled := 0
+	external := 0
 	for _, account := range mapping.Accounts {
+		if str(values[account.Key]["refreshOwner"]) == "external" {
+			external++
+		}
 		if !account.Enabled {
 			continue
 		}
@@ -552,7 +567,7 @@ func importPaths(root, source string, paths activePaths) (map[string]any, error)
 	if err = community.Save(root, registry); err != nil {
 		return nil, err
 	}
-	return map[string]any{"ok": true, "builtin_accounts": len(mapping.Accounts), "enabled_accounts": enabled, "unsupported_accounts": skipped, "google_client_setup_required": missingClients, "catalog_file": catalogPath, "network_requests": 0}, nil
+	return map[string]any{"ok": true, "builtin_accounts": len(mapping.Accounts), "enabled_accounts": enabled, "externally_managed_accounts": external, "unsupported_accounts": skipped, "google_client_setup_required": missingClients, "catalog_file": catalogPath, "network_requests": 0}, nil
 }
 
 func claimAuth(path string) (func(), error) {
@@ -671,10 +686,17 @@ func Sync(root, source string) (map[string]any, error) {
 	documents := map[string]any{}
 	before := map[string]string{}
 	changed := 0
+	external := 0
 	for _, account := range mapping.Accounts {
 		a := obj(auth[account.Key])
 		if a == nil {
 			return nil, errors.New("migrated builtin account was removed")
+		}
+		// The original application still owns this credential. Its newer token
+		// must never be overwritten by a cached copy during gateway rollback.
+		if str(a["refreshOwner"]) == "external" {
+			external++
+			continue
 		}
 		for _, s := range account.Sources {
 			if !filepath.IsAbs(s.Path) {
@@ -761,5 +783,5 @@ func Sync(root, source string) (map[string]any, error) {
 		}
 		changed++
 	}
-	return map[string]any{"ok": true, "synced_accounts": len(mapping.Accounts), "updated_files": changed, "network_requests": 0}, nil
+	return map[string]any{"ok": true, "synced_accounts": len(mapping.Accounts) - external, "externally_managed_accounts": external, "updated_files": changed, "network_requests": 0}, nil
 }

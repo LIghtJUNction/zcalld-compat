@@ -70,6 +70,46 @@ test('Codex refresh returns a rotated token without exposing provider response t
   catch (error) { expect(error.signIn).toBe('expired'); expect(error.message).not.toContain('do-not-log-fixture-token') }
 })
 
+test('externally managed Codex rereads native rotations and never calls the refresh endpoint', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'zcalld-codex-external-'))
+  const source = path.join(dir, 'auth.json')
+  const now = 1000000
+  const jwt = (label, exp = 4000) => `header.${Buffer.from(JSON.stringify({ exp, label })).toString('base64url')}.signature`
+  const original = { tokens: { access_token: jwt('first'), refresh_token: 'fixture-native-refresh-first', account_id: 'fixture-native-account' } }
+  await writeFile(source, JSON.stringify(original), { mode: 0o600 })
+  const stored = { type: 'oauth', refreshOwner: 'external', sourceAuthFile: source,
+    accountId: 'fixture-native-account', access: 'fixture-stale-access', refresh: 'fixture-never-use-this-refresh', expires: 1 }
+  const seen = []
+  const plugin = createCodex({ now: () => now, fetcher: async (url, init) => {
+    expect(new URL(url).pathname).toBe('/backend-api/codex/responses')
+    seen.push(init.headers.get('authorization'))
+    return fragmentedSSE([{ type: 'response.completed', response: { id: 'fixture', output: [], usage: {} } }])
+  } })
+  try {
+    const before = await readFile(source, 'utf8')
+    const copied = await plugin.auth.refresh(stored)
+    expect(copied.refresh).toBe('fixture-native-refresh-first')
+    expect(await readFile(source, 'utf8')).toBe(before)
+    expect(seen.length).toBe(0)
+    const loader = await plugin.auth.loader(async () => stored)
+    const call = () => loader.fetch('https://chatgpt.com/backend-api/codex/responses', { body: JSON.stringify({ model: 'fixture', input: 'hello', stream: false }) })
+    await call()
+    original.tokens.access_token = jwt('second'); original.tokens.refresh_token = 'fixture-native-refresh-second'
+    await writeFile(source, JSON.stringify(original), { mode: 0o600 })
+    await call()
+    expect(seen).toEqual([`Bearer ${jwt('first')}`, `Bearer ${jwt('second')}`])
+    original.tokens.account_id = 'fixture-different-account'
+    await writeFile(source, JSON.stringify(original), { mode: 0o600 })
+    await expect(call()).rejects.toThrow('source account changed')
+    original.tokens.account_id = 'fixture-native-account'; original.tokens.access_token = jwt('expired', 1)
+    await writeFile(source, JSON.stringify(original), { mode: 0o600 })
+    await expect(call()).rejects.toThrow('native owner must renew')
+    await expect(plugin.auth.refresh(stored)).rejects.toThrow('native owner must renew')
+    expect(seen.length).toBe(2)
+    expect(await readFile(source, 'utf8')).toBe(JSON.stringify(original))
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
 test('Copilot shares one token exchange and preserves each model native endpoint', async () => {
   let exchanges = 0
   const requests = []

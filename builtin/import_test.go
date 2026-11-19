@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -76,6 +77,16 @@ func TestImportAndExplicitRotationRollback(t *testing.T) {
 	if !strings.HasPrefix(key, "builtin:codex#") {
 		t.Fatal("missing scoped Codex key")
 	}
+	if obj(auth[key])["refreshOwner"] != "external" {
+		t.Fatal("active Codex must retain its native refresh owner")
+	}
+	if runtime.GOOS != "linux" {
+		t.Skip("explicit native owner handoff verification is Linux-only")
+	}
+	claimFixture(t, root, paths, key)
+	if err = read(filepath.Join(root, "plugin-auth.json"), &auth); err != nil {
+		t.Fatal(err)
+	}
 	entry := obj(auth[key])
 	entry["access"] = "fixture-access-new"
 	entry["refresh"] = "fixture-refresh-new"
@@ -146,6 +157,15 @@ func TestRollbackRefusesDifferentOwnerAndPrevalidatesAllSources(t *testing.T) {
 	}
 	var auth object
 	read(filepath.Join(root, "plugin-auth.json"), &auth)
+	if runtime.GOOS != "linux" {
+		t.Skip("explicit native owner handoff verification is Linux-only")
+	}
+	for key := range auth {
+		if strings.HasPrefix(key, "builtin:codex#") {
+			claimFixture(t, root, paths, key)
+		}
+	}
+	read(filepath.Join(root, "plugin-auth.json"), &auth)
 	for key, value := range auth {
 		if strings.HasPrefix(key, "builtin:codex#") {
 			obj(value)["access"] = "fixture-new-access"
@@ -215,6 +235,16 @@ func TestStringAuthShapeIsPreserved(t *testing.T) {
 	put(t, filepath.Join(source, "logins.json"), logins)
 	if _, err := importPaths(root, source, paths); err != nil {
 		t.Fatal(err)
+	}
+	if runtime.GOOS != "linux" {
+		t.Skip("explicit native owner handoff verification is Linux-only")
+	}
+	var auth object
+	read(filepath.Join(root, "plugin-auth.json"), &auth)
+	for key := range auth {
+		if strings.HasPrefix(key, "builtin:codex#") {
+			claimFixture(t, root, paths, key)
+		}
 	}
 	if _, err := Sync(root, source); err != nil {
 		t.Fatal(err)

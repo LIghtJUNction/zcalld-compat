@@ -2,6 +2,9 @@
 // internal/provider/{account,codex_request}.go at 1e174f8f9f613a920203a4658d259456fcab5d0d.
 import { authJSON, expiry, fetchSafe, headersFor, jwtClaims, jsonResponse, object,
   requestBody, safeBase, secret, sha256, sseEvents } from './common.mjs'
+import { open } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import path from 'node:path'
 
 export const PROVIDER = 'builtin:codex'
 export const CODEX_BASE = 'https://chatgpt.com/backend-api/codex'
@@ -12,6 +15,59 @@ const DEFAULT_VERSION = '0.169.1'
 export function accountID(auth) {
   return auth.accountId || auth.account_id || jwtClaims(auth.idToken ?? auth.id_token)['https://api.openai.com/auth']?.chatgpt_account_id ||
     jwtClaims(auth.access)['https://api.openai.com/auth']?.chatgpt_account_id || ''
+}
+
+// Native Codex only serializes writes to auth.json; its refresh exchange is not
+// covered by the cross-process file lock. Until an explicit owner handoff, this
+// adapter borrows the current access token and never spends its refresh token.
+export async function externalAuth(auth, now = Date.now()) {
+  const file = auth?.sourceAuthFile
+  const expected = accountID(auth)
+  if (typeof file !== 'string' || !path.isAbsolute(file) || !expected) {
+    throw new Error('Externally managed Codex account has no bound credential source')
+  }
+  let handle, raw
+  try {
+    handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+    const st = await handle.stat()
+    if (!st.isFile() || st.size <= 0 || st.size > 1024 * 1024 ||
+      (process.platform !== 'win32' && (st.mode & 0o077) !== 0)) {
+      throw new Error('invalid external credential file')
+    }
+    // A fixed buffer also bounds a file that grows after stat. Codex saves with
+    // an atomic rename, so an opened old generation remains a consistent read.
+    const bytes = Buffer.alloc(st.size + 1)
+    let length = 0
+    while (length < bytes.length) {
+      const read = await handle.read(bytes, length, bytes.length - length, length)
+      if (!read.bytesRead) break
+      length += read.bytesRead
+    }
+    if (length !== st.size) throw new Error('external credential file changed')
+    raw = object(JSON.parse(bytes.subarray(0, length).toString('utf8')))
+  } catch {
+    throw new Error('Cannot read the private externally managed Codex credential file')
+  } finally {
+    if (handle) await handle.close()
+  }
+  const tokens = object(raw.tokens, 'external Codex tokens')
+  const access = secret(tokens.access_token, 'external Codex access token')
+  const next = { access, refresh: tokens.refresh_token ?? '', idToken: tokens.id_token ?? '',
+    accountId: tokens.account_id ?? '', expires: expiry(access, 0, now) }
+  next.accountId = accountID(next)
+  if (next.accountId !== expected) throw new Error('Externally managed Codex source account changed; explicit reconfiguration is required')
+  if (!next.expires || next.expires <= now) {
+    throw new Error('Externally managed Codex access token has expired; its native owner must renew it or complete an explicit handoff')
+  }
+  if (next.refresh) secret(next.refresh, 'external Codex refresh token')
+  if (next.idToken) secret(next.idToken, 'external Codex ID token')
+  return next
+}
+
+function checkOwner(auth) {
+  if (auth?.refreshOwner !== undefined && !['external', 'host'].includes(auth.refreshOwner)) {
+    throw new Error('Codex refresh owner is invalid')
+  }
 }
 
 export function clientHeaders(headers, version = DEFAULT_VERSION) {
@@ -93,6 +149,8 @@ export function createCodex({ fetcher = globalThis.fetch, baseURL = CODEX_BASE, 
       keepAlive: false,
       refreshLead: 120000,
       async refresh(auth) {
+        checkOwner(auth)
+        if (auth.refreshOwner === 'external') return await externalAuth(auth, now())
         const refresh = secret(auth.refresh, 'Codex refresh token')
         const headers = new Headers({ 'content-type': 'application/json' })
         clientHeaders(headers, version)
@@ -120,7 +178,9 @@ export function createCodex({ fetcher = globalThis.fetch, baseURL = CODEX_BASE, 
             const original = requestBody(init)
             const stream = original.stream === true
             const body = prepare(original)
-            const auth = await getAuth()
+            let auth = await getAuth()
+            checkOwner(auth)
+            if (auth?.refreshOwner === 'external') auth = await externalAuth(auth, now())
             const headers = headersFor(init)
             headers.set('authorization', `Bearer ${secret(auth?.access, 'Codex access token')}`)
             const account = accountID(auth)
