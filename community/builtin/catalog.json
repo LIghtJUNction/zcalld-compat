@@ -1,0 +1,534 @@
+[
+  {
+    "id": "builtin:codex",
+    "pluginId": "builtin:codex",
+    "sourceId": "codex",
+    "api": "https://chatgpt.com/backend-api/codex",
+    "npm": "@ai-sdk/openai",
+    "protocol": "responses",
+    "models": [
+      {
+        "id": "codex/gpt-6.2-sol",
+        "apiId": "gpt-6.2-sol",
+        "name": "GPT-6.2-Sol",
+        "url": "https://chatgpt.com/backend-api/codex",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://chatgpt.com/backend-api/codex/responses"
+        }
+      },
+      {
+        "id": "codex/gpt-6.2-astra",
+        "apiId": "gpt-6.2-astra",
+        "name": "GPT-6.2-Astra",
+        "url": "https://chatgpt.com/backend-api/codex",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://chatgpt.com/backend-api/codex/responses"
+        }
+      },
+      {
+        "id": "codex/gpt-6.1-terra",
+        "apiId": "gpt-6.1-terra",
+        "name": "GPT-6.1 Terra",
+        "url": "https://chatgpt.com/backend-api/codex",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://chatgpt.com/backend-api/codex/responses"
+        }
+      },
+      {
+        "id": "codex/gpt-6.1-sol",
+        "apiId": "gpt-6.1-sol",
+        "name": "GPT-6.1-Sol",
+        "url": "https://chatgpt.com/backend-api/codex",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://chatgpt.com/backend-api/codex/responses"
+        }
+      },
+      {
+        "id": "codex/gpt-6-astra",
+        "apiId": "gpt-6-astra",
+        "name": "GPT-6-Astra",
+        "url": "https://chatgpt.com/backend-api/codex",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://chatgpt.com/backend-api/codex/responses"
+        }
+      },
+      {
+        "id": "codex/gpt-6-sol",
+        "apiId": "gpt-6-sol",
+        "name": "GPT-6-Sol",
+        "url": "https://chatgpt.com/backend-api/codex",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://chatgpt.com/backend-api/codex/responses"
+        }
+      },
+      {
+        "id": "codex/gpt-6-luna",
+        "apiId": "gpt-6-luna",
+        "name": "GPT-6-Luna",
+        "url": "https://chatgpt.com/backend-api/codex",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://chatgpt.com/backend-api/codex/responses"
+        }
+      },
+      {
+        "id": "codex/gpt-5.6-sol",
+        "apiId": "gpt-5.6-sol",
+        "name": "GPT-5.6-Sol",
+        "url": "https://chatgpt.com/backend-api/codex",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://chatgpt.com/backend-api/codex/responses"
+        }
+      },
+      {
+        "id": "codex/gpt-5.6-terra",
+        "apiId": "gpt-5.6-terra",
+        "name": "GPT-5.6-Terra",
+        "url": "https://chatgpt.com/backend-api/codex",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://chatgpt.com/backend-api/codex/responses"
+        }
+      },
+      {
+        "id": "codex/gpt-5.6-luna",
+        "apiId": "gpt-5.6-luna",
+        "name": "GPT-5.6-Luna",
+        "url": "https://chatgpt.com/backend-api/codex",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://chatgpt.com/backend-api/codex/responses"
+        }
+      }
+    ]
+  },
+  {
+    "id": "builtin:copilot",
+    "pluginId": "builtin:copilot",
+    "sourceId": "copilot",
+    "api": "https://api.githubcopilot.com",
+    "npm": "@ai-sdk/openai-compatible",
+    "protocol": "chat",
+    "models": [
+      {
+        "id": "copilot/claude-fable-5.1",
+        "apiId": "claude-fable-5.1",
+        "name": "Claude Fable 5.1",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai-compatible",
+        "protocol": "chat",
+        "native_endpoints": [
+          "/v1/chat/completions",
+          "/v1/messages"
+        ],
+        "native_urls": {
+          "chat": "https://api.githubcopilot.com/chat/completions",
+          "anthropic": "https://api.githubcopilot.com/v1/messages"
+        }
+      },
+      {
+        "id": "copilot/claude-fable-5.2",
+        "apiId": "claude-fable-5.2",
+        "name": "Claude Fable 5.2",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai-compatible",
+        "protocol": "chat",
+        "native_endpoints": [
+          "/v1/chat/completions",
+          "/v1/messages"
+        ],
+        "native_urls": {
+          "chat": "https://api.githubcopilot.com/chat/completions",
+          "anthropic": "https://api.githubcopilot.com/v1/messages"
+        }
+      },
+      {
+        "id": "copilot/claude-fable-5",
+        "apiId": "claude-fable-5",
+        "name": "Claude Fable 5",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai-compatible",
+        "protocol": "chat",
+        "native_endpoints": [
+          "/v1/chat/completions",
+          "/v1/messages"
+        ],
+        "native_urls": {
+          "chat": "https://api.githubcopilot.com/chat/completions",
+          "anthropic": "https://api.githubcopilot.com/v1/messages"
+        }
+      },
+      {
+        "id": "copilot/claude-haiku-5.5",
+        "apiId": "claude-haiku-5.5",
+        "name": "Claude Haiku 5.5",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai-compatible",
+        "protocol": "chat",
+        "native_endpoints": [
+          "/v1/chat/completions",
+          "/v1/messages"
+        ],
+        "native_urls": {
+          "chat": "https://api.githubcopilot.com/chat/completions",
+          "anthropic": "https://api.githubcopilot.com/v1/messages"
+        }
+      },
+      {
+        "id": "copilot/claude-opus-4.8-fast",
+        "apiId": "claude-opus-4.8-fast",
+        "name": "Claude Opus 4.8 (fast mode)",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai-compatible",
+        "protocol": "chat",
+        "native_endpoints": [
+          "/v1/chat/completions",
+          "/v1/messages"
+        ],
+        "native_urls": {
+          "chat": "https://api.githubcopilot.com/chat/completions",
+          "anthropic": "https://api.githubcopilot.com/v1/messages"
+        }
+      },
+      {
+        "id": "copilot/claude-opus-5.5",
+        "apiId": "claude-opus-5.5",
+        "name": "Claude Opus 5.5",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai-compatible",
+        "protocol": "chat",
+        "native_endpoints": [
+          "/v1/chat/completions",
+          "/v1/messages"
+        ],
+        "native_urls": {
+          "chat": "https://api.githubcopilot.com/chat/completions",
+          "anthropic": "https://api.githubcopilot.com/v1/messages"
+        }
+      },
+      {
+        "id": "copilot/claude-opus-5",
+        "apiId": "claude-opus-5",
+        "name": "Claude Opus 5",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai-compatible",
+        "protocol": "chat",
+        "native_endpoints": [
+          "/v1/chat/completions",
+          "/v1/messages"
+        ],
+        "native_urls": {
+          "chat": "https://api.githubcopilot.com/chat/completions",
+          "anthropic": "https://api.githubcopilot.com/v1/messages"
+        }
+      },
+      {
+        "id": "copilot/claude-sonnet-5.5",
+        "apiId": "claude-sonnet-5.5",
+        "name": "Claude Sonnet 5.5",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai-compatible",
+        "protocol": "chat",
+        "native_endpoints": [
+          "/v1/chat/completions",
+          "/v1/messages"
+        ],
+        "native_urls": {
+          "chat": "https://api.githubcopilot.com/chat/completions",
+          "anthropic": "https://api.githubcopilot.com/v1/messages"
+        }
+      },
+      {
+        "id": "copilot/claude-sonnet-5",
+        "apiId": "claude-sonnet-5",
+        "name": "Claude Sonnet 5",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai-compatible",
+        "protocol": "chat",
+        "native_endpoints": [
+          "/v1/chat/completions",
+          "/v1/messages"
+        ],
+        "native_urls": {
+          "chat": "https://api.githubcopilot.com/chat/completions",
+          "anthropic": "https://api.githubcopilot.com/v1/messages"
+        }
+      },
+      {
+        "id": "copilot/gemini-3.8-flash",
+        "apiId": "gemini-3.8-flash",
+        "name": "Gemini 3.8 Flash",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai-compatible",
+        "protocol": "chat",
+        "native_endpoints": [
+          "/v1/chat/completions"
+        ],
+        "native_urls": {
+          "chat": "https://api.githubcopilot.com/chat/completions"
+        }
+      },
+      {
+        "id": "copilot/gemini-4-argon",
+        "apiId": "gemini-4-argon",
+        "name": "Gemini 4 Argon",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai-compatible",
+        "protocol": "chat",
+        "native_endpoints": [
+          "/v1/chat/completions"
+        ],
+        "native_urls": {
+          "chat": "https://api.githubcopilot.com/chat/completions"
+        }
+      },
+      {
+        "id": "copilot/gemini-4-carbon",
+        "apiId": "gemini-4-carbon",
+        "name": "Gemini 4 Carbon",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai-compatible",
+        "protocol": "chat",
+        "native_endpoints": [
+          "/v1/chat/completions"
+        ],
+        "native_urls": {
+          "chat": "https://api.githubcopilot.com/chat/completions"
+        }
+      },
+      {
+        "id": "copilot/gemini-4-hydrogen",
+        "apiId": "gemini-4-hydrogen",
+        "name": "Gemini 4 Hydrogen",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai-compatible",
+        "protocol": "chat",
+        "native_endpoints": [
+          "/v1/chat/completions"
+        ],
+        "native_urls": {
+          "chat": "https://api.githubcopilot.com/chat/completions"
+        }
+      },
+      {
+        "id": "copilot/gemini-4-neon",
+        "apiId": "gemini-4-neon",
+        "name": "Gemini 4 Neon",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai-compatible",
+        "protocol": "chat",
+        "native_endpoints": [
+          "/v1/chat/completions"
+        ],
+        "native_urls": {
+          "chat": "https://api.githubcopilot.com/chat/completions"
+        }
+      },
+      {
+        "id": "copilot/gpt-5.3-codex",
+        "apiId": "gpt-5.3-codex",
+        "name": "GPT-5.3-Codex",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://api.githubcopilot.com/responses"
+        }
+      },
+      {
+        "id": "copilot/gpt-5.6-luna",
+        "apiId": "gpt-5.6-luna",
+        "name": "GPT-5.6 Luna",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://api.githubcopilot.com/responses"
+        }
+      },
+      {
+        "id": "copilot/gpt-5.6-sol",
+        "apiId": "gpt-5.6-sol",
+        "name": "GPT-5.6 Sol",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://api.githubcopilot.com/responses"
+        }
+      },
+      {
+        "id": "copilot/gpt-6.1-sol",
+        "apiId": "gpt-6.1-sol",
+        "name": "GPT-6.1 Sol",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://api.githubcopilot.com/responses"
+        }
+      },
+      {
+        "id": "copilot/gpt-6.1-terra",
+        "apiId": "gpt-6.1-terra",
+        "name": "GPT-6.1 Terra",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://api.githubcopilot.com/responses"
+        }
+      },
+      {
+        "id": "copilot/gpt-6-astra",
+        "apiId": "gpt-6-astra",
+        "name": "GPT-6 Astra",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://api.githubcopilot.com/responses"
+        }
+      },
+      {
+        "id": "copilot/gpt-6-luna",
+        "apiId": "gpt-6-luna",
+        "name": "GPT-6 Luna",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://api.githubcopilot.com/responses"
+        }
+      },
+      {
+        "id": "copilot/gpt-6-sol",
+        "apiId": "gpt-6-sol",
+        "name": "GPT-6 Sol",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://api.githubcopilot.com/responses"
+        }
+      },
+      {
+        "id": "copilot/gpt-6.2-astra",
+        "apiId": "gpt-6.2-astra",
+        "name": "GPT-6.2 Astra",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://api.githubcopilot.com/responses"
+        }
+      },
+      {
+        "id": "copilot/gpt-6.2-sol",
+        "apiId": "gpt-6.2-sol",
+        "name": "GPT-6.2 Sol",
+        "url": "https://api.githubcopilot.com",
+        "npm": "@ai-sdk/openai",
+        "protocol": "responses",
+        "native_endpoints": [
+          "/v1/responses"
+        ],
+        "native_urls": {
+          "responses": "https://api.githubcopilot.com/responses"
+        }
+      }
+    ]
+  },
+  {
+    "id": "builtin:antigravity",
+    "pluginId": "builtin:antigravity",
+    "sourceId": "antigravity",
+    "api": "https://daily-cloudcode-pa.googleapis.com",
+    "npm": "@ai-sdk/google",
+    "protocol": "gemini",
+    "models": []
+  },
+  {
+    "id": "builtin:gemini",
+    "pluginId": "builtin:gemini",
+    "sourceId": "gemini",
+    "api": "https://cloudcode-pa.googleapis.com",
+    "npm": "@ai-sdk/google",
+    "protocol": "gemini",
+    "models": []
+  }
+]
