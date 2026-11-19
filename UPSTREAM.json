@@ -1,0 +1,15 @@
+{
+  "project": "https://github.com/yetone/magpie",
+  "revision": "1e174f8f9f613a920203a4658d259456fcab5d0d",
+  "license": "MIT",
+  "imported": [
+    "internal/redact",
+    "internal/lazyre",
+    "internal/pii/guard",
+    "internal/plugin/host.js",
+    "internal/plugin/pi.js"
+  ],
+  "modifications": [
+    "Go module import prefix only; zcalld adapters are separate packages"
+  ]
+}
