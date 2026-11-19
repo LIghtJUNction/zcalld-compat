@@ -8,6 +8,7 @@ import (
 	"github.com/LIghtJUNction/zcalld-compat/builtin"
 	"github.com/LIghtJUNction/zcalld-compat/community"
 	"github.com/LIghtJUNction/zcalld-compat/internal/buildinfo"
+	"github.com/LIghtJUNction/zcalld-compat/routing"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,12 @@ func main() {
 	}
 }
 func run(args []string) error {
+	if len(args) == 1 && args[0] == "routing-worker" {
+		return routing.Serve(os.Stdin, os.Stdout)
+	}
+	if len(args) == 1 && args[0] == "routing-validate" {
+		return routing.Validate(os.Stdin, os.Stdout)
+	}
 	var root, revision, hash, name, version, file, source, privacyRoot, modelRoot, provider, label, account, owners string
 	var positional []string
 	for i := 0; i < len(args); i++ {
