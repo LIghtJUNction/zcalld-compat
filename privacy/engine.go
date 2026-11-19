@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/LIghtJUNction/zcalld-compat/internal/privatefile"
 	"io"
 	"net/http"
 	"os"
@@ -75,8 +76,7 @@ func New(c Config) (*Engine, error) {
 	if err != nil || len(key) < 32 {
 		return nil, errors.New("privacy key is missing or invalid")
 	}
-	fi, err := os.Stat(c.Key)
-	if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm()&0077 != 0 {
+	if !privatefile.Check(c.Key) {
 		return nil, errors.New("privacy key must be a private regular file")
 	}
 	redact.SetKeyPath(c.Key)

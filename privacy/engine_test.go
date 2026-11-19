@@ -3,6 +3,7 @@ package privacy
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/LIghtJUNction/zcalld-compat/internal/privatefile"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,9 @@ func testEngine(t *testing.T, s map[string]any) *Engine {
 	b, _ := json.Marshal(s)
 	os.WriteFile(p, b, 0600)
 	os.WriteFile(k, bytes.Repeat([]byte{1}, 32), 0600)
+	if err := privatefile.Protect(k, 0600); err != nil {
+		t.Fatal(err)
+	}
 	keyLock.Lock()
 	keyPath = ""
 	keyLock.Unlock()

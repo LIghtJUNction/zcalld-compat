@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -23,6 +24,8 @@ type Host struct {
 	cancel context.CancelFunc
 	input  io.WriteCloser
 	scan   *bufio.Scanner
+	output io.Reader
+	closed sync.Once
 	next   uint64
 }
 
@@ -58,7 +61,7 @@ func Start(root string) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, "bun", host)
 	cmd.Dir = root
 	cmd.Stderr = io.Discard
@@ -78,7 +81,7 @@ func Start(root string) (*Host, error) {
 	}
 	scan := bufio.NewScanner(out)
 	scan.Buffer(make([]byte, 65536), 16<<20)
-	h := &Host{cmd: cmd, cancel: cancel, input: in, scan: scan}
+	h := &Host{cmd: cmd, cancel: cancel, input: in, scan: scan, output: out}
 	items := []any{}
 	for _, p := range r.Plugins {
 		if p.Enabled && p.Kind == "community" {
@@ -103,7 +106,21 @@ func Start(root string) (*Host, error) {
 	}
 	return h, nil
 }
-func (h *Host) Close() { h.input.Close(); h.cancel(); h.cmd.Wait() }
+func (h *Host) Close() {
+	h.closed.Do(func() {
+		h.input.Close()
+		go func() { _, _ = io.Copy(io.Discard, h.output) }()
+		done := make(chan struct{})
+		go func() { _ = h.cmd.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(35 * time.Second):
+			h.cancel()
+			<-done
+		}
+		h.cancel()
+	})
+}
 func (h *Host) Call(method string, params, out any) error {
 	h.next++
 	id := h.next

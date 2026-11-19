@@ -5,13 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/LIghtJUNction/zcalld-compat/builtin"
 	"github.com/LIghtJUNction/zcalld-compat/community"
+	"github.com/LIghtJUNction/zcalld-compat/internal/buildinfo"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Println(buildinfo.String("zcalld-pluginctl"))
+		return
+	}
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -24,7 +30,7 @@ func run(args []string) error {
 		a := args[i]
 		switch a {
 		case "--json":
-		case "--root", "--revision", "--sha256", "--name", "--version", "--file", "--input-file", "--source", "--privacy-root", "--model-root":
+		case "--root", "--revision", "--sha256", "--name", "--version", "--file", "--input-file", "--source", "--privacy-root", "--model-root", "--to-magpie":
 			if i+1 == len(args) {
 				return errors.New("missing option value")
 			}
@@ -42,7 +48,7 @@ func run(args []string) error {
 				version = args[i]
 			case "--file", "--input-file":
 				file = args[i]
-			case "--source":
+			case "--source", "--to-magpie":
 				source = args[i]
 			case "--privacy-root":
 				privacyRoot = args[i]
@@ -65,6 +71,10 @@ func run(args []string) error {
 	var result any
 	var err error
 	switch positional[0] {
+	case "import-builtin":
+		result, err = builtin.Import(root, source)
+	case "sync-auth":
+		result, err = builtin.Sync(root, source)
 	case "import-magpie":
 		result, err = community.ImportMagpie(root, community.ImportOptions{Source: source, PrivacyRoot: privacyRoot, ModelRoot: modelRoot})
 	case "session":

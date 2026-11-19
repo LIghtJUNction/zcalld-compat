@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/LIghtJUNction/zcalld-compat/internal/buildinfo"
 	"github.com/LIghtJUNction/zcalld-compat/privacy"
 	"os"
 )
@@ -27,6 +28,10 @@ type answer struct {
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Println(buildinfo.String("zcalld-privacy"))
+		return
+	}
 	scan := bufio.NewScanner(os.Stdin)
 	scan.Buffer(make([]byte, 65536), 24<<20)
 	out := bufio.NewWriterSize(os.Stdout, 65536)

@@ -1,1 +1,3 @@
 Portions of this repository are derived from Magpie, copyright its contributors, under the MIT license. UPSTREAM.json records the exact source revision and imported paths. zcalld compatibility adapters are separate from the upstream engine. No Magpie GUI or gateway is started.
+
+New zcalld adapters are copyright 2026 LIghtJUNction contributors, under MIT. Distributed helper binaries also include the Go runtime and the modules recorded in go.mod/go.sum; LICENSES contains their license notices.

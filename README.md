@@ -83,3 +83,36 @@ OAuth callbacks must run in the same host as authorization. `session` keeps that
 The privacy wrapper tests cover block behavior, setting reloads, the reversible disable switch, explicit-model failure, actual local-model classification, JSON tool arguments, and split SSE placeholders. Manager tests cover lifecycle changes, immutable Git pins, checksum tampering, copy boundaries, and suppressed package scripts. Parent gateway tests exercise real native libraries and Bun against loopback mock providers.
 
 Upstream model evaluation files that require the full Magpie download/cache subsystem are retained under the `magpie_model_corpus` build tag. The ordinary engine and Guard tests run without that subsystem. No test uses a paid inference endpoint or the user's live accounts.
+
+## Releases and packaging
+
+`make check` runs the local Go and builtin-provider mock gates. Ordinary commits
+and pull requests do not start CI. The workflows are manual validation, manual
+bump, and version-tag release. `python3 scripts/bump.py patch` edits VERSION;
+`--release` checks, commits, tags and pushes it. `make release` releases the
+current committed version. In GitHub, **Bump and release** accepts patch, minor,
+or major and dispatches the release workflow explicitly.
+
+`make dist` builds Linux x86_64/aarch64, Windows x86_64, and macOS
+x86_64/aarch64 packages with Go 1.26.8 and CGO disabled. Guard inference uses the
+CPU implementation. The local gate executes Linux helpers; cross compilation
+alone does not establish runtime coverage on Windows or macOS. Each archive
+contains both helpers, host scripts, builtin provider modules/catalog, licenses,
+and build metadata. Source and generated AUR recipes are separate assets;
+SHA256SUMS covers every archive. Source staging requires a clean, committed tree.
+
+The source AUR package is `zcalld-compat`. It installs helpers and JavaScript
+resources below `/usr/libexec/zcalld`, notices below `/usr/share/doc/zcalld-compat`,
+and licenses below `/usr/share/licenses/zcalld-compat`. Bun and Git are optional
+runtime dependencies for JavaScript and pinned Git packages. The parent core
+package supplies the native adapters. Installing this package starts no service.
+
+The release workflow can publish the reviewed AUR recipe when its dedicated
+`AUR_SSH_PRIVATE_KEY` and pinned `AUR_KNOWN_HOSTS` secrets are configured. It does
+not replace published release assets. A failed draft may be completed on retry.
+
+Builtin credentials use `import-builtin --source MAGPIE_CONFIG`. The explicit
+rollback helper is `sync-auth --to-magpie MAGPIE_CONFIG`; it checks original
+account fingerprints before writing refreshed credentials back. Imported Google
+OAuth client metadata belongs in the private `builtin-oauth-clients.json` file,
+not in the repository. Missing client setup is reported before refresh.

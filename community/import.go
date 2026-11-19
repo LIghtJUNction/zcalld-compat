@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -269,7 +270,11 @@ func ImportMagpie(root string, o ImportOptions) (map[string]any, error) {
 		return nil, e
 	}
 	exe, _ := os.Executable()
-	worker := filepath.Join(filepath.Dir(exe), "zcalld-privacy")
+	workerName := "zcalld-privacy"
+	if runtime.GOOS == "windows" {
+		workerName += ".exe"
+	}
+	worker := filepath.Join(filepath.Dir(exe), workerName)
 	privacyConfig := map[string]any{"worker": worker, "settings": filepath.Join(o.PrivacyRoot, "settings.json"), "key": filepath.Join(o.PrivacyRoot, "redact.key"), "model_dir": filepath.Join(o.PrivacyRoot, "models")}
 	b, _ = json.MarshalIndent(privacyConfig, "", "  ")
 	if e = Atomic(filepath.Join(o.PrivacyRoot, "plugin.json"), b, 0600); e != nil {

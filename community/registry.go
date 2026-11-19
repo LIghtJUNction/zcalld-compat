@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/LIghtJUNction/zcalld-compat/internal/privatefile"
 	"io"
 	"os"
 	"path/filepath"
@@ -76,13 +77,16 @@ func Atomic(path string, b []byte, mode os.FileMode) error {
 	if e := os.MkdirAll(filepath.Dir(path), 0700); e != nil {
 		return e
 	}
+	if e := privatefile.Protect(filepath.Dir(path), 0700); e != nil {
+		return e
+	}
 	f, e := os.CreateTemp(filepath.Dir(path), ".zcalld-*")
 	if e != nil {
 		return e
 	}
 	name := f.Name()
 	defer os.Remove(name)
-	if e = f.Chmod(mode); e == nil {
+	if e = privatefile.Protect(name, mode); e == nil {
 		_, e = f.Write(b)
 	}
 	if e == nil {
@@ -98,12 +102,7 @@ func Atomic(path string, b []byte, mode os.FileMode) error {
 	if e = os.Rename(name, path); e != nil {
 		return e
 	}
-	d, e := os.Open(filepath.Dir(path))
-	if e == nil {
-		e = d.Sync()
-		d.Close()
-	}
-	return e
+	return privatefile.SyncDir(filepath.Dir(path))
 }
 func Save(root string, r Registry) error {
 	b, e := json.MarshalIndent(r, "", "  ")
