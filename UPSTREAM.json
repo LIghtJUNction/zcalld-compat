@@ -7,9 +7,14 @@
     "internal/lazyre",
     "internal/pii/guard",
     "internal/plugin/host.js",
-    "internal/plugin/pi.js"
+    "internal/plugin/pi.js",
+    "internal/claudeseal",
+    "internal/testenv",
+    "internal/agentenv",
+    "internal/gateway/testdata/workdir/claude-code-2.1.296.json"
   ],
   "modifications": [
-    "Go module import prefix only; zcalld adapters are separate packages"
+    "Go module import prefix only; zcalld adapters are separate packages",
+    "Upstream eval*_test.go requires full Magpie model download/cache adapter; kept under magpie_model_corpus build tag. Production privacy engine unchanged."
   ]
 }

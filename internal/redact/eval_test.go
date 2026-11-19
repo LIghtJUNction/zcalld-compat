@@ -1,3 +1,5 @@
+//go:build magpie_model_corpus
+
 package redact_test
 
 import (

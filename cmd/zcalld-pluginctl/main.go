@@ -1,0 +1,123 @@
+// zcalld-pluginctl keeps installers and JS runtimes out of the native CLI core.
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"github.com/LIghtJUNction/zcalld-compat/community"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+func main() {
+	if err := run(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+func run(args []string) error {
+	var root, revision, hash, name, version, file, source, privacyRoot, modelRoot string
+	var positional []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch a {
+		case "--json":
+		case "--root", "--revision", "--sha256", "--name", "--version", "--file", "--input-file", "--source", "--privacy-root", "--model-root":
+			if i+1 == len(args) {
+				return errors.New("missing option value")
+			}
+			i++
+			switch a {
+			case "--root":
+				root = args[i]
+			case "--revision":
+				revision = args[i]
+			case "--sha256":
+				hash = args[i]
+			case "--name":
+				name = args[i]
+			case "--version":
+				version = args[i]
+			case "--file", "--input-file":
+				file = args[i]
+			case "--source":
+				source = args[i]
+			case "--privacy-root":
+				privacyRoot = args[i]
+			case "--model-root":
+				modelRoot = args[i]
+			}
+		default:
+			if strings.HasPrefix(a, "--") {
+				return errors.New("unknown plugin option")
+			}
+			positional = append(positional, a)
+		}
+	}
+	if root == "" || !filepath.IsAbs(root) {
+		return errors.New("--root must be an absolute extension directory")
+	}
+	if len(positional) == 0 {
+		positional = []string{"list"}
+	}
+	var result any
+	var err error
+	switch positional[0] {
+	case "import-magpie":
+		result, err = community.ImportMagpie(root, community.ImportOptions{Source: source, PrivacyRoot: privacyRoot, ModelRoot: modelRoot})
+	case "session":
+		return community.Session(root, os.Stdin, os.Stdout)
+	case "verify":
+		if len(positional) != 2 {
+			return errors.New("verify needs a name")
+		}
+		result, err = community.Verify(root, positional[1])
+	case "invoke":
+		if len(positional) != 3 {
+			return errors.New("invoke needs PROVIDER EVENT")
+		}
+		result, err = community.Invoke(root, positional[1], positional[2], file)
+	case "list":
+		if len(positional) != 1 {
+			return errors.New("list takes no name")
+		}
+		result, err = community.List(root)
+	case "inspect":
+		if len(positional) != 2 {
+			return errors.New("inspect needs a name")
+		}
+		result, err = community.Inspect(root, positional[1])
+	case "install":
+		if len(positional) != 2 {
+			return errors.New("install needs a source")
+		}
+		result, err = community.Install(root, community.InstallOptions{Source: positional[1], Name: name, Revision: revision, SHA256: hash, Version: version})
+	case "update":
+		if len(positional) != 2 {
+			return errors.New("update needs a name")
+		}
+		result, err = community.Install(root, community.InstallOptions{Name: positional[1], Revision: revision, SHA256: hash, Version: version, Update: true})
+	case "enable", "disable", "remove", "config":
+		if len(positional) != 2 {
+			return errors.New("plugin action needs a name")
+		}
+		if positional[0] == "config" && file == "" {
+			return errors.New("config needs --file")
+		}
+		result, err = community.Change(root, positional[1], positional[0], file)
+	case "providers":
+		result, err = community.Providers(root)
+	case "runtime":
+		host, pi, e := community.Scripts(root)
+		err = e
+		result = map[string]any{"host": host, "pi": pi}
+	default:
+		return errors.New("unknown plugin command")
+	}
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(result)
+}

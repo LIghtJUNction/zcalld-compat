@@ -1,3 +1,5 @@
+//go:build magpie_model_corpus
+
 package redact_test
 
 // evalCase is one text of the evaluation (eval_test.go): where it comes
