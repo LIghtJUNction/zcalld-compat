@@ -116,3 +116,28 @@ rollback helper is `sync-auth --to-magpie MAGPIE_CONFIG`; it checks original
 account fingerprints before writing refreshed credentials back. Imported Google
 OAuth client metadata belongs in the private `builtin-oauth-clients.json` file,
 not in the repository. Missing client setup is reported before refresh.
+
+## Manage active accounts
+
+`accounts list` reads the host's actual private auth file and returns IDs,
+providers, labels, enabled/selected flags and credential presence. It never
+returns tokens. `accounts import --provider ID --file /absolute/auth.json`
+accepts an SDK auth record (api/key or oauth/access/refresh); optional `--label`
+and `--account` choose metadata and a new stable ID. Existing IDs are not
+silently overwritten. Vendor-native files are handled by the builtin importer
+or the provider's public import/authorization session.
+
+`accounts use ID`, `enable ID`, `disable ID` and `remove ID` update the live
+registry and auth state. A numeric index from the current list is accepted.
+Disabling does not move credentials: a refresh already in flight can still save
+its rotated token. New provider calls check the enabled flag before egress.
+Account metadata alone does not restart Bun. Unbound providers use the selected
+default; the parent CLI updates explicit local bindings and reports any needed
+configuration reload. Removal deletes the credential from the actual host file.
+
+`accounts session` keeps authorization and callbacks in one host. Native Codex
+credentials with an active external owner stay read-only to this component.
+The explicit `handoff --account KEY --owners /absolute/owners.json` operation
+verifies recorded Linux process identities have exited, re-reads the newest
+credential, and changes refresh ownership without a network request. Other
+platforms retain external ownership until equivalent verification is available.

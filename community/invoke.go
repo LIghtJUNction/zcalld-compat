@@ -11,7 +11,7 @@ import (
 var publicMethods = map[string]bool{
 	"providers": true, "prompt": true, "validate": true, "authorize": true, "callback": true,
 	"apiKey": true, "importFiles": true, "usage": true, "checkin": true, "check": true, "keepSignedIn": true,
-	"tool": true, "search": true, "calls": true, "gatewayState": true, "setProviderOptions": true,
+	"tool": true, "search": true, "calls": true, "gatewayStates": true, "setProviderOptions": true,
 }
 
 func Invoke(root, provider, event, file string) (map[string]any, error) {

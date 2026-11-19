@@ -24,18 +24,26 @@ func main() {
 	}
 }
 func run(args []string) error {
-	var root, revision, hash, name, version, file, source, privacyRoot, modelRoot string
+	var root, revision, hash, name, version, file, source, privacyRoot, modelRoot, provider, label, account, owners string
 	var positional []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch a {
 		case "--json":
-		case "--root", "--revision", "--sha256", "--name", "--version", "--file", "--input-file", "--source", "--privacy-root", "--model-root", "--to-magpie":
+		case "--root", "--revision", "--sha256", "--name", "--version", "--file", "--input-file", "--source", "--privacy-root", "--model-root", "--to-magpie", "--provider", "--label", "--account", "--owners":
 			if i+1 == len(args) {
 				return errors.New("missing option value")
 			}
 			i++
 			switch a {
+			case "--provider":
+				provider = args[i]
+			case "--label":
+				label = args[i]
+			case "--owners":
+				owners = args[i]
+			case "--account":
+				account = args[i]
 			case "--root":
 				root = args[i]
 			case "--revision":
@@ -71,8 +79,22 @@ func run(args []string) error {
 	var result any
 	var err error
 	switch positional[0] {
+	case "handoff":
+		result, err = builtin.Handoff(root, account, owners)
+	case "accounts":
+		if len(positional) == 2 && positional[1] == "session" {
+			return community.Session(root, os.Stdin, os.Stdout)
+		}
+		if len(positional) == 2 && positional[1] == "handoff" {
+			result, err = builtin.Handoff(root, account, owners)
+		} else {
+			result, err = community.Accounts(root, positional[1:], community.AccountOptions{Provider: provider, Label: label, ID: account, File: file})
+		}
 	case "import-builtin":
 		result, err = builtin.Import(root, source)
+		if err == nil {
+			err = community.ReconcileAccounts(root)
+		}
 	case "sync-auth":
 		result, err = builtin.Sync(root, source)
 	case "import-magpie":
