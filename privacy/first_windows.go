@@ -3,6 +3,9 @@
 package privacy
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"unsafe"
 
@@ -54,3 +57,22 @@ func firstPrivateNode(path string, info os.FileInfo) bool {
 	return true
 }
 func firstOpen(path string) (*os.File, error) { return os.Open(path) }
+
+func firstFileIdentity(path string, info os.FileInfo) (string, error) {
+	f, err := firstOpen(path)
+	if err != nil {
+		return "", errFirst
+	}
+	defer f.Close()
+	held, err := f.Stat()
+	if err != nil || !os.SameFile(info, held) {
+		return "", errFirst
+	}
+	var id windows.ByHandleFileInformation
+	if windows.GetFileInformationByHandle(windows.Handle(f.Fd()), &id) != nil {
+		return "", errFirst
+	}
+	value := sha256.Sum256([]byte(fmt.Sprintf("zcalld:first:windows:v1:%x:%x:%x",
+		id.VolumeSerialNumber, id.FileIndexHigh, id.FileIndexLow)))
+	return hex.EncodeToString(value[:]), nil
+}

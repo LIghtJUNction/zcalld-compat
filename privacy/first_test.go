@@ -577,3 +577,95 @@ func TestFirstSeedRejectsUnexpectedPrivateLabelsWithoutLeaking(t *testing.T) {
 		t.Fatal("invalid bounded seed failed unsafe")
 	}
 }
+
+func TestFirstTimestampPreservingHistoryReplacement(t *testing.T) {
+	for _, mode := range []string{"file", "directory", "legacy-manifest"} {
+		t.Run(mode, func(t *testing.T) {
+			a, inbox := firstTestStore(t)
+			oldValue, newValue := "{{EMAIL_old111}}", "{{EMAIL_new222}}"
+			firstTestNote(t, a, oldValue, "")
+			day := a.now().Local().Format(auditDay) + ".jsonl"
+			path := filepath.Join(a.dir, day)
+			before, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			changed := bytes.ReplaceAll(data, []byte(oldValue), []byte(newValue))
+			if len(changed) != len(data) || bytes.Equal(changed, data) {
+				t.Fatal("replacement fixture changed its length or nothing")
+			}
+			if mode == "legacy-manifest" {
+				statePath := filepath.Join(firstIndexPath(a.dir), "state.json")
+				raw, err := os.ReadFile(statePath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var state map[string]any
+				decoder := json.NewDecoder(bytes.NewReader(raw))
+				decoder.UseNumber()
+				if decoder.Decode(&state) != nil {
+					t.Fatal("manifest fixture")
+				}
+				delete(state, "directory")
+				for _, item := range state["history"].(map[string]any) {
+					delete(item.(map[string]any), "identity")
+				}
+				raw, err = json.Marshal(state)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writePrivate(t, statePath, raw)
+			}
+			stage := filepath.Join(filepath.Dir(a.dir), "replacement.jsonl")
+			if mode == "directory" {
+				stageDir := filepath.Join(filepath.Dir(a.dir), "replacement-history")
+				if err = os.Mkdir(stageDir, 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err = privatefile.Protect(stageDir, 0700); err != nil {
+					t.Fatal(err)
+				}
+				stage = filepath.Join(stageDir, day)
+			}
+			writePrivate(t, stage, changed)
+			if err = os.Chtimes(stage, before.ModTime(), before.ModTime()); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "directory" {
+				dirInfo, err := os.Stat(a.dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = os.Chtimes(filepath.Dir(stage), dirInfo.ModTime(), dirInfo.ModTime()); err != nil {
+					t.Fatal(err)
+				}
+				if err = os.Rename(a.dir, filepath.Join(filepath.Dir(a.dir), "old-history")); err != nil {
+					t.Fatal(err)
+				}
+				if err = os.Rename(filepath.Dir(stage), a.dir); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err = os.Rename(stage, path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			after, err := os.Stat(path)
+			if err != nil || after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
+				t.Fatal("fixture did not preserve the exact size and modification time")
+			}
+			firstTestNote(t, a, newValue, "")
+			if len(firstTestEvents(t, inbox)) != 1 {
+				t.Fatal("timestamp-preserving replacement was incorrectly announced as a first observation")
+			}
+			firstTestNote(t, a, oldValue, "")
+			if len(firstTestEvents(t, inbox)) != 1 {
+				t.Fatal("reseed forgot a previously committed digest")
+			}
+		})
+	}
+}

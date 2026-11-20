@@ -39,14 +39,16 @@ type firstBucket struct {
 	Count int    `json:"count"`
 }
 type firstStamp struct {
-	Size     int64 `json:"size"`
-	Modified int64 `json:"modified"`
+	Identity string `json:"identity,omitempty"`
+	Size     int64  `json:"size"`
+	Modified int64  `json:"modified"`
 }
 type firstState struct {
-	Version int                    `json:"version"`
-	Ready   bool                   `json:"ready"`
-	Buckets map[string]firstBucket `json:"buckets"`
-	History map[string]firstStamp  `json:"history"`
+	Directory string                 `json:"directory,omitempty"`
+	Version   int                    `json:"version"`
+	Ready     bool                   `json:"ready"`
+	Buckets   map[string]firstBucket `json:"buckets"`
+	History   map[string]firstStamp  `json:"history"`
 }
 type firstHistoryFile struct {
 	path  string
@@ -60,10 +62,11 @@ type firstVerification struct {
 }
 
 type firstIndex struct {
-	dir      string
-	info     os.FileInfo
-	state    firstState
-	original map[string]firstBucket
+	dir             string
+	info            os.FileInfo
+	state           firstState
+	original        map[string]firstBucket
+	historyIdentity string
 }
 
 // The sibling is protected by the existing stable audit lock. It stays outside
@@ -161,6 +164,7 @@ func (i *firstIndex) writeAtomic(name string, data []byte) error {
 
 func (i *firstIndex) commit(history map[string]firstStamp, ready bool) error {
 	i.state.History, i.state.Ready = history, ready
+	i.state.Directory = i.historyIdentity
 	data, err := json.Marshal(i.state)
 	if err != nil || len(data) > firstStateBytes {
 		return errFirst
@@ -267,13 +271,16 @@ func openFirstIndex(history string) (*firstIndex, error) {
 		if dec.Decode(&extra) != io.EOF {
 			return nil, errFirst
 		}
+		if i.state.Directory != "" && !firstHex(i.state.Directory, 64) {
+			return nil, errFirst
+		}
 		for prefix, b := range i.state.Buckets {
 			if !firstHex(prefix, 2) || !firstHex(b.Hash, 64) || b.Count < 1 || b.Count > firstBucketBytes/32 {
 				return nil, errFirst
 			}
 		}
 		for name, s := range i.state.History {
-			if !firstDayName(name) || s.Size < 0 || s.Size > firstHistoryMax {
+			if !firstDayName(name) || s.Size < 0 || s.Size > firstHistoryMax || (s.Identity != "" && !firstHex(s.Identity, 64)) {
 				return nil, errFirst
 			}
 		}
@@ -322,7 +329,11 @@ func firstHistoryFiles(dir string) (map[string]firstHistoryFile, error) {
 		if info.Size() < 0 || total > firstHistoryMax || len(files) >= firstHistoryDays {
 			return nil, errFirst
 		}
-		files[name] = firstHistoryFile{path, firstStamp{info.Size(), info.ModTime().UnixNano()}, info}
+		identity, e := firstFileIdentity(path, info)
+		if e != nil {
+			return nil, errFirst
+		}
+		files[name] = firstHistoryFile{path, firstStamp{Identity: identity, Size: info.Size(), Modified: info.ModTime().UnixNano()}, info}
 	}
 	return files, nil
 }
@@ -481,12 +492,17 @@ func prepareFirst(history string, verified map[string]firstVerification) (*first
 	if err := i.verify(verified); err != nil {
 		return nil, err
 	}
+	i.historyIdentity, err = firstHistoryIdentity(history)
+	if err != nil {
+		return nil, err
+	}
+	directoryChanged := i.state.Directory != i.historyIdentity
 	files, err := firstHistoryFiles(history)
 	if err != nil {
 		return nil, err
 	}
 	batch := make(map[[32]byte]struct{})
-	changed := !i.state.Ready || len(files) != len(i.state.History)
+	changed := !i.state.Ready || directoryChanged || len(files) != len(i.state.History)
 	names := make([]string, 0, len(files))
 	for name := range files {
 		names = append(names, name)
@@ -494,7 +510,7 @@ func prepareFirst(history string, verified map[string]firstVerification) (*first
 	sort.Strings(names)
 	for _, name := range names {
 		entry := files[name]
-		if old, ok := i.state.History[name]; i.state.Ready && ok && old == entry.stamp {
+		if old, ok := i.state.History[name]; i.state.Ready && !directoryChanged && ok && old == entry.stamp {
 			continue
 		}
 		changed = true
@@ -506,6 +522,9 @@ func prepareFirst(history string, verified map[string]firstVerification) (*first
 		if _, err = i.add(batch); err != nil {
 			return nil, err
 		}
+	}
+	if current, e := firstHistoryIdentity(history); e != nil || current != i.historyIdentity {
+		return nil, errFirst
 	}
 	if changed {
 		// Do not commit a cursor if a noncooperating writer changed any file
@@ -537,6 +556,9 @@ func sameFirstFiles(a, b map[string]firstHistoryFile) bool {
 // The caller has durably appended r. Commit every recorded placeholder,
 // including warn-only observations; only the fresh mask/block subset can alert.
 func (i *firstIndex) record(history string, r auditRecord) (map[string]int, error) {
+	if current, err := firstHistoryIdentity(history); err != nil || current != i.historyIdentity {
+		return nil, errFirst
+	}
 	batch := make(map[[32]byte]struct{}, len(r.Values))
 	for _, v := range r.Values {
 		if v.Placeholder == "" || len(v.Placeholder) > 512 {
@@ -566,6 +588,9 @@ func (i *firstIndex) record(history string, r auditRecord) (map[string]int, erro
 		if old, ok := i.state.History[name]; !ok || old != file.stamp {
 			return nil, errFirst
 		}
+	}
+	if current, err := firstHistoryIdentity(history); err != nil || current != i.historyIdentity {
+		return nil, errFirst
 	}
 	// A failed fsync or bucket/manifest commit never reaches publication.
 	if i.commit(firstStamps(files), true) != nil {
@@ -612,4 +637,12 @@ func (i *firstIndex) verify(cache map[string]firstVerification) error {
 		cache[name] = firstVerification{info, info.Size(), info.ModTime().UnixNano()}
 	}
 	return nil
+}
+
+func firstHistoryIdentity(dir string) (string, error) {
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() || !firstPrivateNode(dir, info) {
+		return "", errFirst
+	}
+	return firstFileIdentity(dir, info)
 }
