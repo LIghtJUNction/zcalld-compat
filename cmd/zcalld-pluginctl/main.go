@@ -86,6 +86,24 @@ func run(args []string) error {
 	var result any
 	var err error
 	switch positional[0] {
+	case "quota":
+		if len(positional) != 2 {
+			return errors.New("quota expects list or refresh --account ID")
+		}
+		switch positional[1] {
+		case "list":
+			if account != "" {
+				return errors.New("quota list takes no account")
+			}
+			result, err = community.QuotaList(root)
+		case "refresh":
+			if account == "" {
+				return errors.New("quota refresh requires --account")
+			}
+			result, err = community.QuotaRefresh(root, account)
+		default:
+			return errors.New("quota expects list or refresh --account ID")
+		}
 	case "import-mcp":
 		result, err = community.ImportMCP(root, source)
 	case "mcp":

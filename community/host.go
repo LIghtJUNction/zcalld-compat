@@ -20,13 +20,15 @@ import (
 var scripts embed.FS
 
 type Host struct {
-	cmd    *exec.Cmd
-	cancel context.CancelFunc
-	input  io.WriteCloser
-	scan   *bufio.Scanner
-	output io.Reader
-	closed sync.Once
-	next   uint64
+	cmd           *exec.Cmd
+	cancel        context.CancelFunc
+	input         io.WriteCloser
+	scan          *bufio.Scanner
+	output        io.Reader
+	closed        sync.Once
+	next          uint64
+	drainDeadline time.Time
+	drainGrace    time.Duration
 }
 
 func Scripts(root string) (host, pi string, err error) {
@@ -58,6 +60,10 @@ func Scripts(root string) (host, pi string, err error) {
 	return filepath.Join(directory, "host.js"), filepath.Join(directory, "pi.js"), nil
 }
 func Start(root string) (*Host, error) {
+	return startHost(root, "", time.Time{})
+}
+
+func startHost(root, source string, deadline time.Time) (*Host, error) {
 	r, err := Read(root)
 	if err != nil {
 		return nil, err
@@ -89,7 +95,7 @@ func Start(root string) (*Host, error) {
 	h := &Host{cmd: cmd, cancel: cancel, input: in, scan: scan, output: out}
 	items := []any{}
 	for _, p := range r.Plugins {
-		if p.Enabled && p.Kind == "community" {
+		if p.Enabled && p.Kind == "community" && (source == "" || p.Source == source) {
 			items = append(items, map[string]any{"spec": p.Source, "target": p.Path, "options": p.Options, "gateway": p.Gateway})
 		}
 	}
@@ -99,7 +105,7 @@ func Start(root string) (*Host, error) {
 			Error string `json:"error"`
 		} `json:"plugins"`
 	}
-	if err = h.Call("init", params, &loaded); err != nil {
+	if err = h.callUntil("init", params, &loaded, deadline); err != nil {
 		h.Close()
 		return nil, err
 	}
@@ -119,7 +125,7 @@ func (h *Host) Close() {
 		go func() { _ = h.cmd.Wait(); close(done) }()
 		select {
 		case <-done:
-		case <-time.After(35 * time.Second):
+		case <-time.After(h.drainRemaining()):
 			h.cancel()
 			<-done
 		}
@@ -167,10 +173,13 @@ func Providers(root string) (map[string]any, error) {
 	if e = h.Call("providers", map[string]any{}, &raw); e != nil {
 		return nil, e
 	}
+	if e = saveQuotaCapabilities(root, raw); e != nil {
+		return nil, errors.New("provider discovery completed but capability cache could not be saved")
+	}
 	out := []any{}
 	for _, p := range raw {
 		row := map[string]any{}
-		for _, k := range []string{"id", "name", "spec", "npm", "baseURL", "api", "models", "methods"} {
+		for _, k := range []string{"id", "name", "spec", "npm", "baseURL", "api", "models", "methods", "usage"} {
 			if v, ok := p[k]; ok {
 				row[k] = v
 			}

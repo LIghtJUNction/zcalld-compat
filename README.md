@@ -268,3 +268,8 @@ See [NOTICE_MCP.md](NOTICE_MCP.md) for the pinned upstream contract and licensin
 and the [zcalld MCP guide](https://github.com/LIghtJUNction/zcalld/blob/main/docs/MCP.md)
 for endpoint behavior and native integration tests. `make check` includes both
 MCP and routing worker tests. No fixture uses a live account or provider.
+
+## Explicit quota updates
+
+`zcalld plugins quota list --json` reads local capabilities and cached allowance windows only.
+`zcalld plugins quota refresh --account ACCOUNT_ID --json` explicitly updates one supported, enabled community account through its existing usage and renewal hooks. Credentials stay in the helper; imported quota files are preserved. Unsupported or externally managed accounts are not offered an invented refresh capability. See [the quota contract](https://github.com/LIghtJUNction/zcalld-compat/blob/main/docs/QUOTAS.md) for cancellation, private caching and JSON output.
