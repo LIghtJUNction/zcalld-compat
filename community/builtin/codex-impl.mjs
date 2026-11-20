@@ -3,7 +3,7 @@
 import { authJSON, expiry, fetchSafe, headersFor, jwtClaims, jsonResponse, object,
   requestBody, safeBase, secret, sha256, sseEvents } from './common.mjs'
 import { createCodexMetadata } from './codex-metadata.mjs'
-import { createCodexCreditGuard } from './codex-credits.mjs'
+import { codexQuotaIdentity, createCodexCreditGuard } from './codex-credits.mjs'
 import { open } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import path from 'node:path'
@@ -280,14 +280,21 @@ export function createCodex({ fetcher = globalThis.fetch, baseURL = CODEX_BASE, 
             const account = accountID(auth)
             policy?.assertCurrent()
             if (policy?.codex_no_credits) {
-              const blocked = await creditGuard.check(stored, account, wireInit.signal)
+              // Borrow only the resolved credential. A second external-file read
+              // inside metadata could check another user under this snapshot's key.
+              const snapshot = Object.freeze({ type: stored?.type, access: auth?.access,
+                accountId: account, expires: auth?.expires })
+              const identity = codexQuotaIdentity(snapshot, account)
+              const blocked = await creditGuard.check(snapshot, account, wireInit.signal)
               if (blocked) return blocked
-              // A usage request can overlap a sign-out or a native credential
-              // owner changing account. Never use account A's quota for B.
+              // Workspace IDs are shared by members. Check the actual credential
+              // again before POST, including when an external owner renews it.
               stored = await getAuth()
               checkOwner(stored)
               auth = stored?.refreshOwner === 'external' ? await externalAuth(stored, now()) : stored
-              if (accountID(auth) !== account) throw new Error('Codex account changed during the subscription check')
+              if (codexQuotaIdentity(auth, accountID(auth)) !== identity)
+                throw new Error('Codex account changed during the subscription check')
+              auth = snapshot
             }
             const headers = headersFor(wireInit)
             headers.set('authorization', `Bearer ${secret(auth?.access, 'Codex access token')}`)
@@ -304,7 +311,7 @@ export function createCodex({ fetcher = globalThis.fetch, baseURL = CODEX_BASE, 
             policy?.assertCurrent()
             if (wireInit.signal?.aborted) throw wireInit.signal.reason
             const response = await fetchSafe(fetcher, `${base}/responses${asked.search}`, { ...wireInit, headers, body: JSON.stringify(body) })
-            if (policy?.codex_no_credits) creditGuard.observe(account, response.headers)
+            if (policy?.codex_no_credits) creditGuard.observe(auth, account, response.headers)
             if (!response.ok) return response
             const events = await codexEventStream(response)
             return stream ? events : await collect(events)

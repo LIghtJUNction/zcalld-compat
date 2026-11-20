@@ -1,4 +1,7 @@
 import { test, expect } from 'bun:test'
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { createCodex } from '../codex-impl.mjs'
 import { codexQuotaWindows, createCodexCreditGuard } from '../codex-credits.mjs'
 
@@ -8,6 +11,14 @@ const account = (id = 'fixture-account') => ({
   access: 'fixture.' + Buffer.from(JSON.stringify({ exp: WHEN / 1000 + 3600,
     'https://api.openai.com/auth': { chatgpt_account_id: id } })).toString('base64url') + '.fixture',
 })
+const member = (user, renewal = '') => ({
+  ...account('fixture-workspace'),
+  access: 'fixture.' + Buffer.from(JSON.stringify({ exp: WHEN / 1000 + 3600, renewal,
+    'https://api.openai.com/auth': {
+      chatgpt_account_id: 'fixture-workspace', chatgpt_user_id: user,
+    } })).toString('base64url') + '.fixture',
+})
+const bearer = init => init.headers.get('authorization').slice('Bearer '.length)
 const policy = (restricted = true, assertCurrent = () => {}) =>
   ({ codex_no_credits: restricted, assertCurrent })
 const usage = (used = 10, reset = WHEN / 1000 + 300, secondary = null) => ({
@@ -210,7 +221,7 @@ test('new account-wide exhausted headers win over an older in-flight available u
     await ready.promise; return reply(usage())
   } })
   const check = guard.check(account(), 'fixture-account')
-  guard.observe('fixture-account', new Headers({
+  guard.observe(account(), 'fixture-account', new Headers({
     'x-codex-primary-used-percent': '100',
     'x-codex-primary-window-minutes': '5',
     'x-codex-primary-reset-at': String(WHEN / 1000 + 100),
@@ -222,7 +233,7 @@ test('new account-wide exhausted headers win over an older in-flight available u
 test('unknown named families and incomplete non-full headers cannot authorize or hold another model', async () => {
   let gets = 0
   const guard = createCodexCreditGuard({ now: () => WHEN, readUsage: async () => { gets++; return reply(usage()) } })
-  guard.observe('fixture-account', new Headers({
+  guard.observe(account(), 'fixture-account', new Headers({
     'x-codex-unrelated-v2-primary-used-percent': '100',
     'x-codex-unrelated-v2-primary-window-minutes': '5',
     'x-codex-unrelated-v2-primary-reset-at': String(WHEN / 1000 + 100),
@@ -252,4 +263,121 @@ test('malformed trusted policy is rejected before any fetch', async () => {
   for (const value of [null, {}, { codex_no_credits: 'false', assertCurrent() {} }])
     await expect(loader.fetch(URL, request(value))).rejects.toThrow('trusted Codex account policy')
   expect(calls).toBe(0)
+})
+
+test('different users in one workspace never share available quota, including opaque tokens', async () => {
+  for (const opaque of [false, true]) {
+    const a = member('user-a'), b = member('user-b')
+    if (opaque) { a.access = 'opaque-fixture-a'; b.access = 'opaque-fixture-b' }
+    const gets = [], posts = []
+    const adapter = createCodex({ now: () => WHEN, fetcher: async (url, init) => {
+      const access = bearer(init)
+      if (String(url) === USAGE) {
+        gets.push(access)
+        return reply(usage(access === a.access ? 10 : 100))
+      }
+      posts.push(access); return generated()
+    } })
+    const first = await adapter.auth.loader(async () => a)
+    const second = await adapter.auth.loader(async () => b)
+    expect(await drain(await first.fetch(URL, request()))).toBe(200)
+    expect(await drain(await second.fetch(URL, request()))).toBe(429)
+    expect(gets).toEqual([a.access, b.access])
+    expect(posts).toEqual([a.access])
+  }
+})
+
+test('different users in one workspace never share an in-flight quota lookup', async () => {
+  const a = member('user-a'), b = member('user-b')
+  const ready = deferred(), gets = []
+  const guard = createCodexCreditGuard({ now: () => WHEN, readUsage: async stored => {
+    gets.push(stored.access)
+    await ready.promise
+    return reply(usage(stored.access === a.access ? 10 : 100))
+  } })
+  const first = guard.check(a, a.accountId)
+  const second = guard.check(b, b.accountId)
+  ready.resolve()
+  const results = await Promise.all([first, second])
+  expect(gets).toEqual([a.access, b.access])
+  expect(results[0]).toBe(null)
+  expect(results[1]?.status).toBe(429)
+})
+
+test('exhausted response headers hold only the credential that produced them', async () => {
+  const a = member('user-a'), b = member('user-b')
+  const gets = [], posts = []
+  const adapter = createCodex({ now: () => WHEN, fetcher: async (url, init) => {
+    const access = bearer(init)
+    if (String(url) === USAGE) { gets.push(access); return reply(usage()) }
+    posts.push(access)
+    const response = generated()
+    if (access === a.access) {
+      response.headers.set('x-codex-primary-used-percent', '100')
+      response.headers.set('x-codex-primary-window-minutes', '5')
+      response.headers.set('x-codex-primary-reset-at', String(WHEN / 1000 + 300))
+    }
+    return response
+  } })
+  const first = await adapter.auth.loader(async () => a)
+  const second = await adapter.auth.loader(async () => b)
+  expect(await drain(await first.fetch(URL, request()))).toBe(200)
+  expect(await drain(await second.fetch(URL, request()))).toBe(200)
+  expect(await drain(await first.fetch(URL, request()))).toBe(429)
+  expect(gets).toEqual([a.access, b.access])
+  expect(posts).toEqual([a.access, b.access])
+})
+
+test('member or token changes during a quota read cannot authorize generation', async () => {
+  const a = member('user-a')
+  for (const next of [member('user-b'), member('user-a', 'renewed')]) {
+    let current = a, posts = 0
+    const gets = []
+    const adapter = createCodex({ now: () => WHEN, fetcher: async (url, init) => {
+      if (String(url) === USAGE) {
+        const access = bearer(init)
+        gets.push(access)
+        if (access === a.access) { current = next; return reply(usage()) }
+        return reply(usage(100))
+      }
+      posts++; return generated()
+    } })
+    const loader = await adapter.auth.loader(async () => current)
+    await expect(loader.fetch(URL, request())).rejects.toThrow('subscription check')
+    expect(posts).toBe(0)
+    expect(await drain(await loader.fetch(URL, request()))).toBe(429)
+    expect(gets).toEqual([a.access, next.access])
+    expect(posts).toBe(0)
+  }
+})
+
+test('quota lookup borrows the resolved external credential without reopening its source', async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'zcalld-credits-identity-'))
+  const file = path.join(directory, 'fixture-auth.json')
+  const a = member('user-a'), b = member('user-b')
+  const encoded = auth => JSON.stringify({ tokens: {
+    access_token: auth.access, refresh_token: 'fixture-owner-only', account_id: auth.accountId,
+  } })
+  try {
+    writeFileSync(file, encoded(a), { mode: 0o600 })
+    // The registry copy can lag behind the externally managed source.
+    const stored = { ...b, refreshOwner: 'external', sourceAuthFile: file }
+    const gets = []
+    let posts = 0, changed = false
+    const adapter = createCodex({ now: () => WHEN, fetcher: async (url, init) => {
+      if (String(url) === USAGE) { gets.push(bearer(init)); return reply(usage()) }
+      posts++; return generated()
+    } })
+    const loader = await adapter.auth.loader(async () => stored)
+    const trusted = policy(true, () => {
+      if (!changed) {
+        changed = true
+        writeFileSync(file, encoded(b), { mode: 0o600 })
+      }
+    })
+    await expect(loader.fetch(URL, request(trusted))).rejects.toThrow('subscription check')
+    expect(gets).toEqual([a.access])
+    expect(posts).toBe(0)
+    expect(readFileSync(file, 'utf8')).toBe(encoded(b))
+  } finally { rmSync(directory, { recursive: true, force: true }) }
 })

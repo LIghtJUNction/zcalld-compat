@@ -1,7 +1,9 @@
 // Client-side subscription-window guard. There is no server "never bill credits"
 // switch: a separate client or a single large request can cross a window between
 // this check and generation. No background poller or paid retry is introduced.
-const MAX_ACCOUNTS = 64
+import { secret, sha256 } from './common.mjs'
+
+const MAX_IDENTITIES = 64
 const CACHE_MS = 1000
 const USAGE_TIMEOUT_MS = 8000
 const MAX_USAGE_BYTES = 65536
@@ -87,26 +89,33 @@ function policyResult(parsed, nowMs) {
   return stillCurrent(parsed, nowMs) ? null : unknown()
 }
 
+// A workspace can contain multiple users. Key local quota state by the exact
+// credential used for its GET; renewal starts a fresh short cache. Keep tokens
+// out of cache keys and do not rely on optional JWT user claims.
+export function codexQuotaIdentity(auth, account) {
+  return sha256(JSON.stringify([account, secret(auth?.access, 'Codex access token')]))
+}
+
 export function createCodexCreditGuard({ readUsage, now = Date.now }) {
   const cache = new Map()
   const pending = new Map()
   let revision = 0
-  function remember(account, parsed) {
-    cache.delete(account)
-    while (cache.size >= MAX_ACCOUNTS) cache.delete(cache.keys().next().value)
+  function remember(identity, parsed) {
+    cache.delete(identity)
+    while (cache.size >= MAX_IDENTITIES) cache.delete(cache.keys().next().value)
     const entry = { parsed, at: now(), revision: ++revision }
-    cache.set(account, entry)
+    cache.set(identity, entry)
     return entry
   }
-  function acquire(account, stored) {
-    const existing = pending.get(account)
+  function acquire(identity, auth, account) {
+    const existing = pending.get(identity)
     if (existing && !existing.controller.signal.aborted) return existing
-    if (!existing && pending.size >= MAX_ACCOUNTS) return null
+    if (!existing && pending.size >= MAX_IDENTITIES) return null
     const flight = { controller: new AbortController(), waiters: new Set(), settled: false, started: revision }
-    pending.set(account, flight)
+    pending.set(identity, flight)
     flight.promise = (async () => {
       try {
-        const response = await readUsage(stored, {
+        const response = await readUsage(auth, {
           operation: 'usage', account_hint: account, timeout_ms: USAGE_TIMEOUT_MS,
           max_response_bytes: MAX_USAGE_BYTES, signal: flight.controller.signal,
         })
@@ -137,15 +146,15 @@ export function createCodexCreditGuard({ readUsage, now = Date.now }) {
         let offset = 0
         for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
         const parsed = codexQuotaWindows(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)), now())
-        const newer = cache.get(account)
+        const newer = cache.get(identity)
         // A generation that finished while this GET was pending can supply a
         // newer full-window header. Do not overwrite that hold with the old GET.
         if (newer && newer.revision > flight.started) return newer.parsed
-        if (parsed.known || parsed.held) remember(account, parsed)
+        if (parsed.known || parsed.held) remember(identity, parsed)
         return parsed
       } finally {
         flight.settled = true
-        if (pending.get(account) === flight) pending.delete(account)
+        if (pending.get(identity) === flight) pending.delete(identity)
       }
     })()
     // A caller may abort in the same turn before attaching its waiter.
@@ -175,13 +184,14 @@ export function createCodexCreditGuard({ readUsage, now = Date.now }) {
     })
   }
   return {
-    async check(stored, account, signal) {
+    async check(auth, account, signal) {
       if (signal?.aborted) throw abortReason(signal)
       if (typeof account !== 'string' || !account || account.length > 256) return unknown()
-      const current = cache.get(account)
+      const identity = codexQuotaIdentity(auth, account)
+      const current = cache.get(identity)
       if (current && now() - current.at >= 0 && now() - current.at < CACHE_MS &&
           stillCurrent(current.parsed, now())) return policyResult(current.parsed, now())
-      const flight = acquire(account, stored)
+      const flight = acquire(identity, auth, account)
       if (!flight) return unknown()
       try {
         const parsed = await wait(flight, signal)
@@ -192,7 +202,8 @@ export function createCodexCreditGuard({ readUsage, now = Date.now }) {
         return unknown()
       }
     },
-    observe(account, headers) {
+    observe(auth, account, headers) {
+      const identity = codexQuotaIdentity(auth, account)
       // These fixed headers describe the account-wide subscription windows.
       // A new named family is not assumed to correspond to the current model.
       const full = []
@@ -212,7 +223,7 @@ export function createCodexCreditGuard({ readUsage, now = Date.now }) {
       if (!full.length) return
       // Headers can prove a hold. Partial headers never create permission to
       // generate or extend the lifetime of an older available usage snapshot.
-      remember(account, { known: true, windows: full, held: true,
+      remember(identity, { known: true, windows: full, held: true,
         reset_at: full.every(w => w.resets_at !== null) ? Math.max(...full.map(w => w.resets_at)) : null })
     },
   }
