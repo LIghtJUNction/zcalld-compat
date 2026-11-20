@@ -3,6 +3,7 @@
 import { authJSON, expiry, fetchSafe, headersFor, jwtClaims, jsonResponse, object,
   requestBody, safeBase, secret, sha256, sseEvents } from './common.mjs'
 import { createCodexMetadata } from './codex-metadata.mjs'
+import { createCodexCreditGuard } from './codex-credits.mjs'
 import { open } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import path from 'node:path'
@@ -229,11 +230,13 @@ export function createCodex({ fetcher = globalThis.fetch, baseURL = CODEX_BASE, 
   version = DEFAULT_VERSION, now = Date.now, testMode = false } = {}) {
   const base = safeBase(baseURL, 'Codex endpoint', testMode)
   const token = safeBase(tokenURL, 'Codex token endpoint', testMode)
+  const codexMetadata = createCodexMetadata({ fetcher, externalAuth, accountID, clientHeaders, now })
+  const creditGuard = createCodexCreditGuard({ readUsage: codexMetadata, now })
   return {
     auth: {
       provider: PROVIDER,
       methods: [],
-      codexMetadata: createCodexMetadata({ fetcher, externalAuth, accountID, clientHeaders, now }),
+      codexMetadata,
       // Refresh only when an operation needs the account. The host owns a
       // per-account, cross-process renewal lock and persists before releasing it.
       keepAlive: false,
@@ -263,17 +266,31 @@ export function createCodex({ fetcher = globalThis.fetch, baseURL = CODEX_BASE, 
         return {
           baseURL: base,
           async fetch(url, init) {
+            const { zcalldAccountPolicy: policy, ...wireInit } = init ?? {}
+            if (policy !== undefined && (!policy || typeof policy.codex_no_credits !== 'boolean' ||
+                typeof policy.assertCurrent !== 'function')) throw new Error('Invalid trusted Codex account policy')
             const asked = new URL(url)
             if (!/\/responses\/?$/u.test(asked.pathname)) throw new Error('Codex supports the Responses endpoint')
-            const original = requestBody(init)
+            const original = requestBody(wireInit)
             const stream = original.stream === true
             const body = prepare(original)
-            let auth = await getAuth()
-            checkOwner(auth)
-            if (auth?.refreshOwner === 'external') auth = await externalAuth(auth, now())
-            const headers = headersFor(init)
-            headers.set('authorization', `Bearer ${secret(auth?.access, 'Codex access token')}`)
+            let stored = await getAuth()
+            checkOwner(stored)
+            let auth = stored?.refreshOwner === 'external' ? await externalAuth(stored, now()) : stored
             const account = accountID(auth)
+            policy?.assertCurrent()
+            if (policy?.codex_no_credits) {
+              const blocked = await creditGuard.check(stored, account, wireInit.signal)
+              if (blocked) return blocked
+              // A usage request can overlap a sign-out or a native credential
+              // owner changing account. Never use account A's quota for B.
+              stored = await getAuth()
+              checkOwner(stored)
+              auth = stored?.refreshOwner === 'external' ? await externalAuth(stored, now()) : stored
+              if (accountID(auth) !== account) throw new Error('Codex account changed during the subscription check')
+            }
+            const headers = headersFor(wireInit)
+            headers.set('authorization', `Bearer ${secret(auth?.access, 'Codex access token')}`)
             if (account) headers.set('chatgpt-account-id', secret(account, 'Codex account ID'))
             else headers.delete('chatgpt-account-id')
             clientHeaders(headers, version)
@@ -284,7 +301,10 @@ export function createCodex({ fetcher = globalThis.fetch, baseURL = CODEX_BASE, 
               const key = secret(body.prompt_cache_key, 'Codex prompt cache key')
               headers.set('session-id', key); headers.set('thread-id', key)
             }
-            const response = await fetchSafe(fetcher, `${base}/responses${asked.search}`, { ...init, headers, body: JSON.stringify(body) })
+            policy?.assertCurrent()
+            if (wireInit.signal?.aborted) throw wireInit.signal.reason
+            const response = await fetchSafe(fetcher, `${base}/responses${asked.search}`, { ...wireInit, headers, body: JSON.stringify(body) })
+            if (policy?.codex_no_credits) creditGuard.observe(account, response.headers)
             if (!response.ok) return response
             const events = await codexEventStream(response)
             return stream ? events : await collect(events)

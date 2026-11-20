@@ -53,6 +53,41 @@ test('model mapping preserves official instructions/capabilities and advertises 
   expect(response.headers.get('set-cookie')).toBeNull()
   expect(response.headers.get('authorization')).toBeNull()
 })
+test('model upgrades use an advertised local alias and preserve upstream guidance', async()=>{
+  const upgrade={model:'next-upstream',migration_config:{high:'high'},message:'Official upgrade guidance'}
+  const source={...model,upgrade}
+  const target={...model,slug:'next-upstream',base_instructions:'Next official instructions'}
+  const response=await hook(async()=>json({models:[source,target]}))(auth(),request('models',{
+    models:[{route:'local-old',model:'actual-slug'},{route:'local-next',model:'next-upstream'}]
+  }))
+  expect(response.status).toBe(200)
+  const data=await response.json()
+  expect(data.models.map(entry=>entry.slug)).toEqual(['local-old','local-next'])
+  expect(data.models[0].upgrade).toEqual({...upgrade,model:'local-next'})
+  expect(data.models[0].base_instructions).toBe(model.base_instructions)
+  expect(data.models[1].base_instructions).toBe('Next official instructions')
+  expect(source.upgrade).toEqual(upgrade)
+})
+test('model upgrades require an unambiguous advertised target', async()=>{
+  const source={...model,upgrade:{model:'next-upstream',message:'Official'}}
+  const target={...model,slug:'next-upstream'}
+  const cases=[
+    {extra:[],official:[source,target],expected:null},
+    {extra:[{route:'missing-official',model:'next-upstream'}],official:[source],expected:null},
+    {extra:[{route:'next-a',model:'next-upstream'},{route:'next-b',model:'next-upstream'}],official:[source,target],expected:null},
+    {extra:[{route:'next-a',model:'next-upstream'},{route:'next-upstream',model:'next-upstream'}],official:[source,target],expected:{...source.upgrade}}
+  ]
+  for(const {extra,official,expected} of cases){
+    const response=await hook(async()=>json({models:official}))(auth(),request('models',{
+      models:[{route:'local-old',model:'actual-slug'},...extra]
+    }))
+    expect(response.status).toBe(200)
+    const data=await response.json()
+    expect(data.models[0].upgrade).toEqual(expected)
+    if(expected)expect(data.models.some(entry=>entry.slug===expected.model)).toBe(true)
+  }
+})
+
 test('metadata never fabricates missing instructions or malformed catalog', async()=>{
   for(const value of [{models:[{slug:'actual-slug'}]},{models:[model,model]},{models:null}]) {
     const result=await hook(async()=>json(value))(auth(),request('models'))

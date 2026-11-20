@@ -31,18 +31,20 @@ func run(args []string) error {
 	if len(args) == 1 && args[0] == "routing-validate" {
 		return routing.Validate(os.Stdin, os.Stdout)
 	}
-	var root, revision, hash, name, version, file, source, privacyRoot, modelRoot, provider, label, account, owners string
+	var root, revision, hash, name, version, file, source, privacyRoot, modelRoot, provider, label, account, owners, expectedPlan string
 	var positional []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch a {
 		case "--json":
-		case "--root", "--revision", "--sha256", "--name", "--version", "--file", "--input-file", "--source", "--privacy-root", "--model-root", "--to-magpie", "--provider", "--label", "--account", "--owners":
+		case "--root", "--revision", "--sha256", "--name", "--version", "--file", "--input-file", "--source", "--privacy-root", "--model-root", "--to-magpie", "--provider", "--label", "--account", "--owners", "--expect-plan":
 			if i+1 == len(args) {
 				return errors.New("missing option value")
 			}
 			i++
 			switch a {
+			case "--expect-plan":
+				expectedPlan = args[i]
 			case "--provider":
 				provider = args[i]
 			case "--label":
@@ -107,6 +109,13 @@ func run(args []string) error {
 	case "import-mcp":
 		result, err = community.ImportMCP(root, source)
 	case "codex":
+		if len(positional) >= 2 && positional[1] == "policy" {
+			if len(positional) != 3 || (positional[2] != "plan" && positional[2] != "sync") || source == "" {
+				return errors.New("codex policy expects plan --source PATH or sync --source PATH --expect-plan HASH")
+			}
+			result, err = builtin.CodexPolicy(root, source, expectedPlan, positional[2] == "sync")
+			break
+		}
 		action := "show"
 		if len(positional) > 2 {
 			return errors.New("codex takes one action")

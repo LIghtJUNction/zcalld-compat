@@ -309,3 +309,31 @@ See [the gateway configuration and endpoint contract](https://github.com/LIghtJU
 Tests use synthetic credentials. The ordinary Responses adapter also retains
 opaque compaction IDs and encrypted content, with plaintext privacy processing
 still enabled.
+
+### Codex subscription-credit policy
+
+`zcalld plugins codex policy plan --source ABS_MAGPIE_CONFIG --json` reads the
+current source's `codexNoCredits` identities and matches only proven imported
+accounts. It reports counts and a plan hash without writing files. Apply the
+reviewed plan with `codex policy sync --source ABS_MAGPIE_CONFIG
+--expect-plan HASH --json`. Changed or unmapped identities stop the operation.
+The command modifies only private registry `account_policies`; credentials,
+refresh ownership, and credential rollback fingerprints are untouched.
+
+The native host resolves the actual account first and rereads its policy on each
+generation request, even with cached loaders. An explicit `codex_no_credits:
+true` policy checks the fixed official account-usage endpoint with an eight-second
+ceiling, a 64 KiB bound, no redirects, and cancellation shared only while another
+caller still needs the lookup. A one-second bounded cache is keyed by the
+official account identity. Exhausted subscription windows return 429 before
+generation, and unverified availability returns 503. Existing group fallback
+can select another account; the blocked account is not retried using credits.
+Malformed present policy is an error. Unrestricted accounts add no usage query.
+
+The source can acquire new policies after migration; synchronization remains
+explicit and does not reimport auth. There is no server-side guarantee that
+credits can never be charged: another client or the current generation can cross
+a window after the check. See the [core contract and usage guide](https://github.com/LIghtJUNction/zcalld/blob/main/docs/CODEX.md#subscription-credit-policy)
+for the exact scope. These changes require the updated native host as declared
+by the package dependency; installing a helper alone does not rewrite an older
+materialized builtin bundle.
