@@ -361,6 +361,12 @@ func quotaRefresh(root, account string, call quotaCaller) (map[string]any, error
 	if e = Atomic(filepath.Join(root, quotaCacheFile), append(b, '\n'), 0600); e != nil {
 		return nil, e
 	}
-	return map[string]any{"ok": true, "account": account, "provider": accountProvider(account), "cached_at": reading.At,
-		"windows": len(reading.Windows), "message": "Quota cache updated from the selected account's usage hook."}, nil
+	result := map[string]any{"ok": true, "account": account, "provider": accountProvider(account), "cached_at": reading.At,
+		"windows": len(reading.Windows), "message": "Quota cache updated from the selected account's usage hook."}
+	// Notification is an optional consequence of this fresh committed reading.
+	// It must never erase the cache, fail the update or run from QuotaList.
+	if publishQuotaDesktop(root, account, reading) != nil {
+		result["desktop_warning"] = "Quota cache was updated; the optional desktop notification was not published."
+	}
+	return result, nil
 }
