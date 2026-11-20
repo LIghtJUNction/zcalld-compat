@@ -32,7 +32,7 @@ check() {
   ./zcalld-privacy --version
   ./zcalld-pluginctl --version
   ./zcalld-claude-tui --version
-  go test -mod=readonly ./cmd/zcalld-privacy ./cmd/zcalld-claude-tui ./privacy ./desktop ./maintenance ./claudemaintenance ./internal/claudetui/... ./internal/redact ./internal/lazyre ./internal/pii/guard
+  go test -mod=readonly ./cmd/zcalld-privacy ./cmd/zcalld-claude-tui ./privacy ./desktop ./maintenance ./claudemaintenance ./claudeprovider ./internal/claudebridge ./internal/claudetui/... ./internal/redact ./internal/lazyre ./internal/pii/guard
   python3 scripts/test-maintenance.py ./zcalld-pluginctl
   go test -mod=readonly -c -o fake-claude-tui ./internal/claudetui
   python3 scripts/test-claude-tui.py --helper ./zcalld-claude-tui --fake-claude ./fake-claude-tui

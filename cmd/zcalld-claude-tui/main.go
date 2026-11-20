@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/LIghtJUNction/zcalld-compat/internal/buildinfo"
+	"github.com/LIghtJUNction/zcalld-compat/internal/claudebridge"
 	"github.com/LIghtJUNction/zcalld-compat/internal/claudetui"
 )
 
@@ -37,6 +38,9 @@ func main() {
 }
 
 func run(args []string, out io.Writer) error {
+	if len(args) > 0 && args[0] == claudetui.MCPCommand {
+		return claudebridge.RunMCP(args[1:], os.Stdin, out)
+	}
 	if len(args) == 1 && args[0] == "--version" {
 		_, err := fmt.Fprintln(out, buildinfo.String("zcalld-claude-tui"))
 		return err
@@ -49,6 +53,7 @@ func run(args []string, out io.Writer) error {
 			"claude_binary_absolute": true, "config_dir_explicit": true,
 			"profile_path_explicit": true, "workspace_explicit": true,
 			"deadline_required": true, "wsl": false, "conpty": "system",
+			"mcp_tool_bridge": true, "owned_drain": true,
 			"platform": runtime.GOOS,
 		})
 	}

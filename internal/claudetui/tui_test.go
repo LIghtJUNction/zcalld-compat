@@ -26,6 +26,9 @@ import (
 // writes each line typed into its transcript as a turn answered "echo:
 // <line>"; with -p it answers each stream-json line with a -p result.
 func TestMain(m *testing.M) {
+	if providerProbe() {
+		return
+	}
 	switch os.Getenv("MAGPIE_TUI_TEST") {
 	case "shim":
 		// FAKE_IMAGE_PAD: imagePad, as another system's
@@ -484,6 +487,10 @@ func fakeClaude(args []string) {
 			if _, err := os.Stat(listed); err != nil {
 				line += " (without magpie's tools)"
 			}
+		}
+		if providerTurn(args, dir, sid, line, asTyped, tapped) {
+			fmt.Print("\r\n❯ ")
+			continue
 		}
 		if tapped != nil {
 			streams++

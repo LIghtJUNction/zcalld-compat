@@ -35,6 +35,9 @@ func (h Host) selected(key string) (config, account, string, error) {
 	if err = validateAccount(a); err != nil {
 		return c, a, "", err
 	}
+	if runMarkerRetained(a) {
+		return c, a, "", errProcessDrain
+	}
 	b, _ := json.Marshal(c)
 	return c, a, digest(b), nil
 }
@@ -72,7 +75,23 @@ func (h Host) work() (string, error) {
 }
 
 func capabilities(ctx context.Context, c config, env []string, work string) error {
-	if c.Print {
+	return checkCapabilities(ctx, c, env, work, false)
+}
+
+func providerCapabilities(ctx context.Context, c config, env []string, work string) error {
+	return checkCapabilities(ctx, c, env, work, true)
+}
+
+func capabilityFailure(err error) error {
+	unavailable := errors.New("Claude interactive helper is unavailable")
+	if errors.Is(err, errProcessDrain) {
+		return errors.Join(unavailable, errProcessDrain)
+	}
+	return unavailable
+}
+
+func checkCapabilities(ctx context.Context, c config, env []string, work string, provider bool) error {
+	if c.Print && !provider {
 		return nil
 	}
 	helper, err := executable(c.Helper)
@@ -83,8 +102,12 @@ func capabilities(ctx context.Context, c config, env []string, work string) erro
 	defer cancel()
 	out, _, err := runProcess(capctx, helper, []string{"--capabilities"}, env, work, nil, false, nil)
 	if err != nil {
-		return errors.New("Claude interactive helper is unavailable")
+		return capabilityFailure(err)
 	}
+	return validateCapabilities(out, provider)
+}
+
+func validateCapabilities(out []byte, provider bool) error {
 	var caps struct {
 		Version     int    `json:"schema_version"`
 		Interactive bool   `json:"interactive"`
@@ -95,8 +118,10 @@ func capabilities(ctx context.Context, c config, env []string, work string) erro
 		Fallback    bool   `json:"print_fallback"`
 		WSL         bool   `json:"wsl"`
 		Source      string `json:"source_revision"`
+		ToolBridge  bool   `json:"mcp_tool_bridge"`
+		OwnedDrain  bool   `json:"owned_drain"`
 	}
-	if json.Unmarshal(out, &caps) != nil || caps.Version != 1 || !caps.Interactive || !caps.Binary || !caps.Config || !caps.Profile || !caps.Stream || caps.Fallback || caps.WSL || caps.Source != referenceRevision {
+	if json.Unmarshal(out, &caps) != nil || caps.Version != 1 || !caps.Interactive || !caps.Binary || !caps.Config || !caps.Profile || !caps.Stream || caps.Fallback || caps.WSL || caps.Source != referenceRevision || (provider && (!caps.ToolBridge || !caps.OwnedDrain)) {
 		return errors.New("Claude interactive helper capability is incompatible")
 	}
 	return nil
@@ -159,7 +184,7 @@ func (h Host) inspectLocked(ctx context.Context, key string, c config, a account
 	return result, nil
 }
 
-func (h Host) Inspect(ctx context.Context, key string) (maintenance.Snapshot, error) {
+func (h Host) Inspect(ctx context.Context, key string) (result maintenance.Snapshot, err error) {
 	c, a, stamp, err := h.selected(key)
 	if err != nil {
 		return maintenance.Snapshot{}, err
@@ -168,7 +193,7 @@ func (h Host) Inspect(ctx context.Context, key string) (maintenance.Snapshot, er
 	if err != nil {
 		return maintenance.Snapshot{}, err
 	}
-	defer release()
+	defer func() { finishRunMarker(a, release, err) }()
 	work, err := h.work()
 	if err != nil {
 		return maintenance.Snapshot{}, err
@@ -213,6 +238,9 @@ func completed(b []byte, stream bool) bool {
 
 func (h Host) Warmup(ctx context.Context, key string, windows []string) (maintenance.ActionResult, error) {
 	result, err := h.warmup(ctx, key, windows)
+	if errors.Is(err, errProcessDrain) {
+		return maintenance.ActionResult{Status: "unknown", Code: "process_exit_unconfirmed"}, err
+	}
 	if result.Status == "not_sent" && err != nil {
 		result.Code = "preflight_failed"
 		return result, nil
@@ -220,7 +248,7 @@ func (h Host) Warmup(ctx context.Context, key string, windows []string) (mainten
 	return result, err
 }
 
-func (h Host) warmup(ctx context.Context, key string, windows []string) (maintenance.ActionResult, error) {
+func (h Host) warmup(ctx context.Context, key string, windows []string) (result maintenance.ActionResult, err error) {
 	no := maintenance.ActionResult{Status: "not_sent"}
 	c, a, stamp, err := h.selected(key)
 	if err != nil {
@@ -230,7 +258,7 @@ func (h Host) warmup(ctx context.Context, key string, windows []string) (mainten
 	if err != nil {
 		return no, err
 	}
-	defer release()
+	defer func() { finishRunMarker(a, release, err) }()
 	work, err := h.work()
 	if err != nil {
 		return no, err

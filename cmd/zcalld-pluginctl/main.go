@@ -91,6 +91,17 @@ func run(args []string) error {
 	var result any
 	var err error
 	switch positional[0] {
+	case "claude-provider":
+		if source != "" || provider != "" || account != "" || owners != "" || desktopInbox != "" || revision != "" || hash != "" || name != "" || version != "" || privacyRoot != "" || modelRoot != "" || label != "" {
+			return errors.New("claude-provider takes only explicit binding options")
+		}
+		if len(positional) == 2 && positional[1] == "worker" {
+			if file != "" || expectedPlan != "" {
+				return errors.New("claude-provider worker takes only --root")
+			}
+			return runClaudeProviderWorker(root)
+		}
+		result, err = runClaudeProviderBinding(root, file, expectedPlan, positional[1:])
 	case "maintenance":
 		if len(positional) == 2 && positional[1] == "worker" {
 			if provider != "" || file != "" || account != "" {

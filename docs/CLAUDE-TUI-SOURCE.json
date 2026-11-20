@@ -254,10 +254,11 @@
       "source_path": "internal/claudetui/tui_test.go",
       "source_blob": "ea825d991244b55d7e9dcdd2066b074f2cf0e863",
       "changes": [
-        "fixture supplies explicit config/session; optional synthetic native process markers; no actual Claude"
+        "fixture supplies explicit config/session; optional synthetic native process markers; no actual Claude",
+        "add the explicit provider MCP bridge and compiled synthetic-provider test hooks"
       ],
-      "bytes": 72823,
-      "sha256": "5c5e3b98fa932fac0c7507c04261cd1f26b50bc0d1779767aac13f3713ec311d",
+      "bytes": 72958,
+      "sha256": "9da7a7e78c3d634c353cdda930d295c33eea94ef07abe270ab45b8840756e23f",
       "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/tui_test.go"
     },
     {
@@ -383,10 +384,11 @@
       "source_path": null,
       "source_blob": null,
       "changes": [
-        "new standalone contract or synthetic native acceptance"
+        "new standalone contract or synthetic native acceptance",
+        "add the explicit provider MCP bridge and compiled synthetic-provider test hooks"
       ],
-      "bytes": 6465,
-      "sha256": "f4c6b8164df1673deecc04b4bb28346dc98ff37dfccec842717f737d146c96f7"
+      "bytes": 6690,
+      "sha256": "f383a0483f4814d6c6feb8c70ed7677a02df4793f8c10ed933d8e45be56e054f"
     },
     {
       "path": "cmd/zcalld-claude-tui/main_test.go",

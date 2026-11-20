@@ -6,8 +6,8 @@ build:
 	go build -mod=readonly -trimpath -ldflags "$(FLAGS)" -o bin/zcalld-pluginctl ./cmd/zcalld-pluginctl
 	go build -mod=readonly -trimpath -ldflags "$(FLAGS)" -o bin/zcalld-claude-tui ./cmd/zcalld-claude-tui
 check:
-	go test -mod=readonly ./cmd/zcalld-privacy ./cmd/zcalld-claude-tui ./privacy ./community ./builtin ./routing ./desktop ./maintenance ./claudemaintenance ./internal/claudetui/... ./internal/privatefile ./internal/redact ./internal/lazyre ./internal/pii/guard
-	go vet -mod=readonly ./privacy ./community ./builtin ./routing ./desktop ./maintenance ./claudemaintenance ./internal/claudetui/... ./internal/privatefile ./cmd/...
+	go test -mod=readonly ./cmd/zcalld-privacy ./cmd/zcalld-claude-tui ./privacy ./community ./builtin ./routing ./desktop ./maintenance ./claudemaintenance ./claudeprovider ./internal/claudebridge ./internal/claudetui/... ./internal/privatefile ./internal/redact ./internal/lazyre ./internal/pii/guard
+	go vet -mod=readonly ./privacy ./community ./builtin ./routing ./desktop ./maintenance ./claudemaintenance ./claudeprovider ./internal/claudebridge ./internal/claudetui/... ./internal/privatefile ./cmd/...
 	bun test community/builtin/tests community/tests
 	python3 -c "import ast,pathlib; [ast.parse(p.read_text()) for p in pathlib.Path('scripts').glob('*.py')]"
 	python3 scripts/test-aur.py
