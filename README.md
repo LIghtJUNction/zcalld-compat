@@ -162,7 +162,8 @@ or major and dispatches the release workflow explicitly.
 x86_64/aarch64 packages with Go 1.26.8 and CGO disabled. Guard inference uses the
 CPU implementation. The local gate executes Linux helpers; cross compilation
 alone does not establish runtime coverage on Windows or macOS. Each archive
-contains both helpers, host scripts, builtin provider modules/catalog, licenses,
+contains all three helpers (`zcalld-pluginctl`, `zcalld-privacy`, and
+`zcalld-claude-tui`), host scripts, builtin provider modules/catalog, licenses,
 and build metadata. Source and generated AUR recipes are separate assets;
 SHA256SUMS covers every archive. Source staging requires a clean, committed tree.
 
