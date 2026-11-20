@@ -52,7 +52,7 @@ Do not remove a pending ledger entry merely to make an action retry. Its purpose
 
 ## Optional schedulers
 
-The package provides templates. None is enabled by package installation. Scheduler activation is an independent deployment action after a reviewed plan has been applied and the policy explicitly enabled.
+Arch packages and Linux native archives install the service and timer under `/usr/lib/systemd/user/`. All native archives and the Arch package also carry this guide under `share/doc/zcalld-compat/docs/`, plus the macOS and Windows templates under `share/doc/zcalld-compat/packaging/`. Unix archives place that shared directory beneath `usr/`; the Windows ZIP places it at the archive root. None of these schedulers is enabled by package installation. Scheduler activation is an independent deployment action after a reviewed plan has been applied and the policy explicitly enabled.
 
 ### Linux
 

@@ -63,6 +63,27 @@ def archive_tree(source, dest, timestamp):
                     with file.open("rb") as f:
                         tar.addfile(info, f)
 
+def stage_maintenance(prefix, goos):
+    """Package documentation and inactive scheduler templates, without activation."""
+    if goos not in {"linux", "darwin", "windows"}:
+        raise ValueError("unsupported maintenance scheduler platform")
+    doc = prefix / "share/doc/zcalld-compat"
+    for name in (
+        "docs/CODEX-MAINTENANCE.md",
+        "packaging/launchd/org.zcalld.maintenance.plist.in",
+        "packaging/windows/zcalld-maintenance.xml.in",
+    ):
+        dest = doc / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / name, dest)
+        dest.chmod(0o644)
+    if goos == "linux":
+        for name in ("zcalld-maintenance.service", "zcalld-maintenance.timer"):
+            dest = prefix / "lib/systemd/user" / name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / "packaging/systemd/user" / name, dest)
+            dest.chmod(0o644)
+
 def build(target, out):
     goos, goarch = TARGETS[target]
     value = version()
@@ -94,6 +115,7 @@ def build(target, out):
         doc.mkdir(parents=True)
         for name in ("README.md", "NOTICE", "NOTICE_ROUTING.md", "NOTICE_MCP.md", "UPSTREAM.json"):
             shutil.copyfile(ROOT / name, doc / name)
+        stage_maintenance(prefix, goos)
         license_dir = prefix / "share/licenses/zcalld-compat"
         license_dir.mkdir(parents=True)
         shutil.copyfile(ROOT / "LICENSE", license_dir / "LICENSE")
