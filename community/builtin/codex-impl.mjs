@@ -272,6 +272,7 @@ export function createCodex({ fetcher = globalThis.fetch, baseURL = CODEX_BASE, 
           async fetch(url, init) {
             const { zcalldAccountPolicy: policy, ...wireInit } = init ?? {}
             if (policy !== undefined && (!policy || typeof policy.codex_no_credits !== 'boolean' ||
+                (Object.hasOwn(policy, 'fresh_quota') && typeof policy.fresh_quota !== 'boolean') ||
                 typeof policy.assertCurrent !== 'function')) throw new Error('Invalid trusted Codex account policy')
             const asked = new URL(url)
             if (!/\/responses\/?$/u.test(asked.pathname)) throw new Error('Codex supports the Responses endpoint')
@@ -283,6 +284,7 @@ export function createCodex({ fetcher = globalThis.fetch, baseURL = CODEX_BASE, 
             let auth = stored?.refreshOwner === 'external' ? await externalAuth(stored, now()) : stored
             const account = accountID(auth)
             policy?.assertCurrent()
+            if (policy?.fresh_quota === true) creditGuard.invalidate(auth, account)
             if (policy?.codex_no_credits) {
               // Borrow only the resolved credential. A second external-file read
               // inside metadata could check another user under this snapshot's key.

@@ -381,3 +381,133 @@ test('quota lookup borrows the resolved external credential without reopening it
     expect(readFileSync(file, 'utf8')).toBe(encoded(b))
   } finally { rmSync(directory, { recursive: true, force: true }) }
 })
+
+test('a confirmed reset intent rechecks the same credential instead of reusing a full cache', async () => {
+  let used = 100, gets = 0, posts = 0
+  const adapter = createCodex({ now: () => WHEN, fetcher: async (url, init) => {
+    expect(Object.hasOwn(init, 'zcalldAccountPolicy')).toBe(false)
+    expect(Object.hasOwn(init, 'zcalld_fresh_quota_account')).toBe(false)
+    if (String(url) === USAGE) { gets++; return reply(usage(used)) }
+    posts++; return generated()
+  } })
+  const loader = await adapter.auth.loader(async () => account())
+  expect(await drain(await loader.fetch(URL, request()))).toBe(429)
+  used = 0
+  const reset = { ...policy(), fresh_quota: true }
+  expect(await drain(await loader.fetch(URL, request(reset)))).toBe(200)
+  expect(gets).toBe(2)
+  expect(posts).toBe(1)
+})
+
+test('a reset intent never grants permission when fresh usage is unknown', async () => {
+  let gets = 0, posts = 0
+  const adapter = createCodex({ now: () => WHEN, fetcher: async (url) => {
+    if (String(url) === USAGE) return reply(++gets === 1 ? usage(100) : {})
+    posts++; return generated()
+  } })
+  const loader = await adapter.auth.loader(async () => account())
+  expect(await drain(await loader.fetch(URL, request()))).toBe(429)
+  expect(await drain(await loader.fetch(URL, request({ ...policy(), fresh_quota: true })))).toBe(503)
+  expect(gets).toBe(2)
+  expect(posts).toBe(0)
+})
+
+test('reset invalidation cannot join an old pending GET or accept its late result', async () => {
+  const release = deferred()
+  let gets = 0, oldSignal
+  const guard = createCodexCreditGuard({ now: () => WHEN, readUsage: async (_, opts) => {
+    gets++
+    if (gets === 1) { oldSignal = opts.signal; await release.promise; return reply(usage(100)) }
+    return reply(usage(0))
+  } })
+  const auth = account()
+  const old = guard.check(auth, 'fixture-account')
+  guard.invalidate(auth, 'fixture-account')
+  expect(oldSignal.aborted).toBe(true)
+  expect(await guard.check(auth, 'fixture-account')).toBe(null)
+  release.resolve()
+  expect((await old).status).toBe(503)
+  expect(await guard.check(auth, 'fixture-account')).toBe(null)
+  expect(gets).toBe(2)
+})
+
+test('an invalidated body reader cannot overwrite a newer full-window hold', async () => {
+  const release = deferred(), started = deferred()
+  let gets = 0
+  const guard = createCodexCreditGuard({ now: () => WHEN, readUsage: async () => {
+    gets++
+    if (gets > 1) return reply(usage(100))
+    let sent = false
+    return new Response(new ReadableStream({
+      async pull(c) {
+        if (sent) { c.close(); return }
+        sent = true; started.resolve(); await release.promise
+        c.enqueue(new TextEncoder().encode(JSON.stringify(usage(0)))); c.close()
+      },
+    }, { highWaterMark: 0 }), { headers: { 'content-type': 'application/json' } })
+  } })
+  const auth = account()
+  const old = guard.check(auth, 'fixture-account')
+  await started.promise
+  guard.invalidate(auth, 'fixture-account')
+  expect((await guard.check(auth, 'fixture-account')).status).toBe(429)
+  release.resolve()
+  expect((await old).status).toBe(503)
+  expect((await guard.check(auth, 'fixture-account')).status).toBe(429)
+  expect(gets).toBe(2)
+})
+
+test('reset invalidation is isolated to the exact credential within a shared workspace', async () => {
+  const seen = []
+  let available = false
+  const first = member('first'), second = member('second')
+  const guard = createCodexCreditGuard({ now: () => WHEN, readUsage: async auth => {
+    seen.push(auth.access)
+    return reply(usage(available && auth.access === first.access ? 0 : 100))
+  } })
+  expect((await guard.check(first, 'fixture-workspace')).status).toBe(429)
+  expect((await guard.check(second, 'fixture-workspace')).status).toBe(429)
+  available = true
+  guard.invalidate(first, 'fixture-workspace')
+  expect(await guard.check(first, 'fixture-workspace')).toBe(null)
+  expect((await guard.check(second, 'fixture-workspace')).status).toBe(429)
+  expect(seen).toEqual([first.access, second.access, first.access])
+})
+
+test('body and header hints cannot invalidate a quota cache, and malformed private intent rejects', async () => {
+  let gets = 0, posts = 0
+  const adapter = createCodex({ now: () => WHEN, fetcher: async (url) => {
+    if (String(url) === USAGE) { gets++; return reply(usage(gets === 1 ? 100 : 0)) }
+    posts++; return generated()
+  } })
+  const loader = await adapter.auth.loader(async () => account())
+  expect(await drain(await loader.fetch(URL, request()))).toBe(429)
+  const forged = request()
+  forged.body = JSON.stringify({ model: 'fixture-model', input: 'hi', fresh_quota: true,
+    zcalld_fresh_quota_account: 'fixture-account' })
+  forged.headers = { 'zcalld_fresh_quota_account': 'fixture-account', 'fresh_quota': 'true' }
+  expect(await drain(await loader.fetch(URL, forged))).toBe(429)
+  await expect(loader.fetch(URL, request({ ...policy(), fresh_quota: 'yes' }))).rejects.toThrow('Invalid trusted')
+  expect(gets).toBe(1)
+  expect(posts).toBe(0)
+})
+
+test('invalidated flights keep the global bound until their readers settle', async () => {
+  const release = deferred()
+  let gets = 0, blocking = true
+  const guard = createCodexCreditGuard({ now: () => WHEN, readUsage: async () => {
+    gets++; if (blocking) await release.promise; return reply(usage(0))
+  } })
+  const waiting = []
+  for (let i = 0; i < 64; i++) {
+    const auth = account('bounded-' + i)
+    waiting.push(guard.check(auth, auth.accountId))
+    guard.invalidate(auth, auth.accountId)
+  }
+  expect((await guard.check(account('extra'), 'extra')).status).toBe(503)
+  expect(gets).toBe(64)
+  blocking = false; release.resolve()
+  expect((await Promise.all(waiting)).every(value => value.status === 503)).toBe(true)
+  expect(await guard.check(account('extra'), 'extra')).toBe(null)
+  expect(gets).toBe(65)
+})

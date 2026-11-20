@@ -381,10 +381,11 @@ function codexPolicyState(key) {
   return { restricted, stamp: JSON.stringify([key, meta, entries[0], identity,
     registry.account_defaults?.["builtin:codex"] ?? null, restricted]) }
 }
-function codexAccountPolicy(key) {
+function codexAccountPolicy(key, freshQuota = false) {
   const frozen = codexPolicyState(key)
   return Object.freeze({
     codex_no_credits: frozen.restricted,
+    fresh_quota: freshQuota,
     assertCurrent() {
       if (codexPolicyState(key).stamp !== frozen.stamp)
         throw new Error("Codex account or credit policy changed before generation; try again with the current configuration")
@@ -3631,7 +3632,14 @@ async function fetchAs(id, record, key, params) {
   // renewed it: a 401 is judged against it (staleAccess)
   const before = key ? readAuth()[key] : undefined
   try {
-    const accountPolicy = provider === "builtin:codex" ? codexAccountPolicy(key) : undefined
+    // This top-level intent is produced only by the native recovery resource.
+    // Body fields and HTTP headers are never used to request invalidation.
+    const freshQuota = Object.hasOwn(params, "zcalld_fresh_quota_account")
+    if (freshQuota && (provider !== "builtin:codex" ||
+        params.zcalld_fresh_quota_account !== key || params.account !== key ||
+        !/^builtin:codex#[a-f0-9]{20}$/u.test(key)))
+      throw new Error("Confirmed Codex reset does not match the explicit account")
+    const accountPolicy = provider === "builtin:codex" ? codexAccountPolicy(key, freshQuota) : undefined
     const o = await options(provider, key)
     checkFetch(record)
     const h = new Headers()
