@@ -63,6 +63,7 @@ function modelsFor(data, bindings) {
     upstream.set(model.slug, model)
   }
   const seen = new Set()
+  const routesByModel = new Map()
   const models = []
   for (const binding of bindings) {
     const { route, model } = object(binding)
@@ -76,9 +77,21 @@ function modelsFor(data, bindings) {
     if (typeof entry.base_instructions !== 'string' &&
         typeof entry.model_messages?.instructions_template !== 'string')
       throw new Error('upstream model omitted instructions')
-    // Preserve every upstream capability and instruction; only expose the proven
-    // local route name as slug. Dynamic/cross-provider mappings are rejected by host.
+    // Dynamic/cross-provider mappings are rejected by the host. Only account
+    // models with a proven local route participate in links within the catalog.
+    const routes = routesByModel.get(model) ?? []
+    routes.push(route)
+    routesByModel.set(model, routes)
     models.push({ ...entry, slug: route })
+  }
+  for (const entry of models) {
+    if (!entry.upgrade || typeof entry.upgrade !== 'object' || Array.isArray(entry.upgrade)) continue
+    const target = entry.upgrade.model
+    const routes = routesByModel.get(target)
+    // Keep an advertised canonical slug, or the sole public alias. Multiple
+    // aliases have no implicit preference; omit that upgrade rather than pick one.
+    const route = routes?.includes(target) ? target : routes?.length === 1 ? routes[0] : null
+    entry.upgrade = route === null ? null : { ...entry.upgrade, model: route }
   }
   return { ...data, models }
 }
