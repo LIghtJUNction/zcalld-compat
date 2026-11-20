@@ -108,6 +108,38 @@ def build(target, out):
         archive_tree(stage, dest, epoch())
         print(json.dumps({"artifact": str(dest), "bytes": dest.stat().st_size, "sha256": sha(dest)}))
 
+
+def render_aur(out, value, checksum, pkgrel=1):
+    if not re.fullmatch(r"\d+\.\d+\.\d+", value):
+        raise SystemExit("AUR version must contain X.Y.Z")
+    if not isinstance(pkgrel, int) or pkgrel < 1:
+        raise SystemExit("pkgrel must be a positive integer")
+    if not re.fullmatch(r"[0-9a-f]{64}", checksum):
+        raise SystemExit("a SHA256 source checksum is required")
+    rendered = {}
+    for name in ("PKGBUILD", ".SRCINFO"):
+        template = (ROOT / "packaging/aur" / (name + ".in")).read_text()
+        rendered[name] = template.replace("@VERSION@", value).replace("@PKGREL@", str(pkgrel)).replace("@SHA256@", checksum)
+    out.mkdir(parents=True, exist_ok=True)
+    for name, text in rendered.items():
+        (out / name).write_text(text)
+
+def render_published_aur(source, out, value, checksum, pkgrel=1):
+    if sha(source) != checksum:
+        raise SystemExit("published source archive checksum mismatch")
+    with tarfile.open(source, "r:gz") as archive:
+        try:
+            entry = archive.getmember(f"zcalld-compat-{value}/VERSION")
+        except KeyError:
+            raise SystemExit("source archive does not contain the requested version") from None
+        if not entry.isfile() or entry.size > 64:
+            raise SystemExit("invalid source VERSION entry")
+        stream = archive.extractfile(entry)
+        if stream is None or stream.read(65).decode("ascii").strip() != value:
+            raise SystemExit("source archive version mismatch")
+    render_aur(out, value, checksum, pkgrel)
+    print(json.dumps({"version": value, "pkgrel": pkgrel, "sha256": checksum, "aur": str(out)}))
+
 def stage_release(out):
     if run("git", "status", "--porcelain", text=True).strip():
         raise SystemExit("stage a release from committed sources")
@@ -121,10 +153,7 @@ def stage_release(out):
     with source.open("wb") as f, gzip.GzipFile(filename="", mode="wb", fileobj=f, mtime=epoch()) as gz:
         gz.write(raw)
     aur = out / "aur"
-    aur.mkdir(exist_ok=True)
-    for name in ("PKGBUILD", ".SRCINFO"):
-        template = (ROOT / "packaging/aur" / (name + ".in")).read_text()
-        (aur / name).write_text(template.replace("@VERSION@", value).replace("@SHA256@", sha(source)))
+    render_aur(aur, value, sha(source))
     aur_archive = out / f"zcalld-compat-{value}-aur.tar.gz"
     archive_tree(aur, aur_archive, epoch())
     assets = sorted([out / name for name in expected] + [source, aur_archive])
@@ -148,6 +177,12 @@ def main():
     b.add_argument("--out", type=Path, default=ROOT / "dist")
     s = sub.add_parser("stage")
     s.add_argument("--out", type=Path, default=ROOT / "dist")
+    a = sub.add_parser("aur", help="render an AUR revision from an already published source archive")
+    a.add_argument("--source", type=Path, required=True)
+    a.add_argument("--version", required=True)
+    a.add_argument("--sha256", required=True)
+    a.add_argument("--pkgrel", type=int, default=1)
+    a.add_argument("--out", type=Path, required=True)
     sub.add_parser("tag")
     args = p.parse_args()
     if args.command == "build":
@@ -155,6 +190,8 @@ def main():
             build(target, args.out.resolve())
     elif args.command == "stage":
         stage_release(args.out.resolve())
+    elif args.command == "aur":
+        render_published_aur(args.source.resolve(), args.out.resolve(), args.version, args.sha256, args.pkgrel)
     else:
         tag()
 
