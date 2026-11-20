@@ -1,3 +1,5 @@
 Portions of this repository are derived from Magpie, copyright its contributors, under the MIT license. UPSTREAM.json records the exact source revision and imported paths. zcalld compatibility adapters are separate from the upstream engine. No Magpie GUI or gateway is started.
 
 New zcalld adapters are copyright 2026 LIghtJUNction contributors, under MIT. Distributed helper binaries also include the Go runtime and the modules recorded in go.mod/go.sum; LICENSES contains their license notices.
+
+privacy/audit.go adapts the metadata schema, per-placeholder aggregation, daily checked counters and whole-day retention policy from upstream internal/maskrec/maskrec.go and checked.go at the pinned revision. zcalld adds bounded metadata, cross-process locking, explicit flush acknowledgement, graceful-EOF flush and platform-private files. Detection records do not claim a final provider or generation outcome.

@@ -7,19 +7,21 @@ import (
 	"fmt"
 	"github.com/LIghtJUNction/zcalld-compat/internal/buildinfo"
 	"github.com/LIghtJUNction/zcalld-compat/privacy"
+	"io"
 	"os"
 )
 
 type request struct {
-	ID          uint64         `json:"id"`
-	Op          string         `json:"op"`
-	Config      privacy.Config `json:"config"`
-	Body        []byte         `json:"body"`
-	Route       string         `json:"route"`
-	Stream      uint64         `json:"stream"`
-	ContentType string         `json:"content_type"`
-	Enabled     bool           `json:"enabled"`
-	Final       bool           `json:"final"`
+	ID          uint64          `json:"id"`
+	Op          string          `json:"op"`
+	Config      privacy.Config  `json:"config"`
+	Body        []byte          `json:"body"`
+	Route       string          `json:"route"`
+	Context     privacy.Context `json:"context"`
+	Stream      uint64          `json:"stream"`
+	ContentType string          `json:"content_type"`
+	Enabled     bool            `json:"enabled"`
+	Final       bool            `json:"final"`
 }
 type answer struct {
 	ID     uint64 `json:"id"`
@@ -32,11 +34,24 @@ func main() {
 		fmt.Println(buildinfo.String("zcalld-privacy"))
 		return
 	}
-	scan := bufio.NewScanner(os.Stdin)
+	os.Exit(run(os.Stdin, os.Stdout, os.Stderr))
+}
+
+func run(input io.Reader, output io.Writer, diagnostic io.Writer) (code int) {
+	scan := bufio.NewScanner(input)
 	scan.Buffer(make([]byte, 65536), 24<<20)
-	out := bufio.NewWriterSize(os.Stdout, 65536)
+	out := bufio.NewWriterSize(output, 65536)
 	enc := json.NewEncoder(out)
 	var engine *privacy.Engine
+	auditWarned := false
+	defer func() {
+		if engine != nil {
+			if err := engine.Close(); err != nil {
+				fmt.Fprintln(diagnostic, "privacy audit counter flush failed")
+				code = 1
+			}
+		}
+	}()
 	streams := map[uint64]*privacy.Stream{}
 	for scan.Scan() {
 		var r request
@@ -51,6 +66,11 @@ func main() {
 				if err != nil {
 					a.Error = err.Error()
 				} else {
+					if engine != nil {
+						if err := engine.Close(); err != nil {
+							fmt.Fprintln(diagnostic, "privacy audit counter flush failed")
+						}
+					}
 					engine = e
 					a.Result = true
 				}
@@ -58,12 +78,24 @@ func main() {
 				if engine == nil {
 					a.Error = "privacy worker is not configured"
 				} else {
-					v, err := engine.Mask(r.Body, r.Route)
+					v, err := engine.MaskWithContext(r.Body, r.Route, r.Context)
 					if err != nil {
 						a.Error = err.Error()
 					} else {
 						a.Result = v
+						if v.AuditError != "" && !auditWarned {
+							fmt.Fprintln(diagnostic, "privacy audit history write failed; redaction remains active")
+						}
+						auditWarned = v.AuditError != ""
 					}
+				}
+			case "flush":
+				if engine == nil {
+					a.Error = "privacy worker is not configured"
+				} else if err := engine.Flush(); err != nil {
+					a.Error = err.Error()
+				} else {
+					a.Result = true
 				}
 			case "open":
 				if engine == nil {
@@ -106,11 +138,12 @@ func main() {
 			}
 		}
 		if enc.Encode(a) != nil || out.Flush() != nil {
-			return
+			return 1
 		}
 	}
 	if scan.Err() != nil {
-		fmt.Fprintln(os.Stderr, "privacy input exceeded limit")
-		os.Exit(1)
+		fmt.Fprintln(diagnostic, "privacy input exceeded limit")
+		return 1
 	}
+	return 0
 }

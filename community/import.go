@@ -278,7 +278,7 @@ func ImportMagpie(root string, o ImportOptions) (map[string]any, error) {
 		workerName += ".exe"
 	}
 	worker := filepath.Join(filepath.Dir(exe), workerName)
-	privacyConfig := map[string]any{"worker": worker, "settings": filepath.Join(o.PrivacyRoot, "settings.json"), "key": filepath.Join(o.PrivacyRoot, "redact.key"), "model_dir": filepath.Join(o.PrivacyRoot, "models")}
+	privacyConfig := map[string]any{"worker": worker, "settings": filepath.Join(o.PrivacyRoot, "settings.json"), "key": filepath.Join(o.PrivacyRoot, "redact.key"), "model_dir": filepath.Join(o.PrivacyRoot, "models"), "history_dir": filepath.Join(o.PrivacyRoot, "history")}
 	b, _ = json.MarshalIndent(privacyConfig, "", "  ")
 	if e = Atomic(filepath.Join(o.PrivacyRoot, "plugin.json"), b, 0600); e != nil {
 		return nil, e

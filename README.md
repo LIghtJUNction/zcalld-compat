@@ -72,6 +72,71 @@ The importer retains existing masking history. The worker does not write origina
 
 The local model adapter currently runs AstrLink Guard. It was tested against the installed pinned 7216b6a3b897 model, including tokenizer and classifier fixtures. Privacy Filter selections are reported as unavailable and fail closed; this component never silently substitutes a different model for an explicit selection.
 
+### Detection history
+
+The worker now appends detection events to `history_dir/YYYY-MM-DD.jsonl`. An
+omitted `history_dir` resolves to `history` beside the settings file, so an older
+imported binding continues to use its migrated history. New imports write the
+explicit absolute path. The day uses local time; each record also includes its
+RFC 3339 timestamp.
+
+The format follows [Magpie maskrec at the pinned revision](https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/maskrec/maskrec.go):
+`key`, `t`, `what`, optional `agent` and `session`, `n`, `values`, and
+optional `blocked`. Each value has `p` (placeholder), `k` (kind), `b` (finder),
+`l` (character length), `n` (occurrences), optional `h` (the upstream first
+character or key-prefix hint), and optional `a` (warn/block action).
+Repeated placeholders are merged. Original complete values, request bodies,
+surrounding text, response content, and restoration mappings are never stored.
+Hints intentionally reveal the same small prefix as upstream; the history is
+private data.
+
+An event records detection during `Mask`. It does **not** assert that a provider
+received the request or completed a generation. This worker cannot reliably
+know the final provider, model, trace route, or generation outcome, so those
+fields remain absent. Response restoration does not create another event.
+A no-hit request creates no JSONL event. Warn and block findings do create one.
+
+Daily `checked-YYYY-MM-DD.json` files retain the upstream
+`agent -> {looked, masked, whole}` shape. Every enabled request with actual
+content increments `looked`; any finding also increments `masked`. These are
+request counts, not value counts. Imported `whole` counts are preserved;
+this adapter has no per-model unmasked exception that would increment them.
+An empty activation probe and `zcalldEnabled: false` increment nothing.
+Counters merge with existing files under a process lock, normally write within
+five seconds, and flush on normal stdin EOF.
+
+| Worker operation or field | Contract |
+| --- | --- |
+| `mask.context` | Optional or null; string `agent` <=512 bytes, `session` <=1024, `what` <=2048. Supplied by the gateway's existing whitelist. |
+| `mask.result.audit_error` | Optional fixed string `privacy audit history is unavailable`; no paths or request values. The masked result remains valid. |
+| `flush` | Returns `result: true` after pending counters are persisted, or the fixed audit error. It leaves the engine usable. |
+| stdin EOF | Stops the timer and flushes remaining counters; failure gives a nonzero exit status. |
+
+Each event retains at most 4,096 distinct values and encodes to at most 1 MiB.
+`omitted_hits` explicitly counts finding metadata omitted by those bounds;
+the total masking count and the protected request are unchanged. Each day's
+counter map keeps at most 1,024 agent identities plus `other`; further
+identities add to `other`. Counter files are limited to 1 MiB. Old history is
+pruned by whole day: 30 days, and a 100 MiB JSONL retention target checked
+hourly while events are written. Checked files have their own 30-day retention.
+No daily file is partially truncated.
+
+Directories and files receive private permissions, including a protected DACL
+on Windows. The stable lock is a sibling of the history directory:
+`privacy/.history.zcalld-audit.lock` for `privacy/history`. It coordinates
+multiple workers and cutover without moving with a history-directory exchange.
+The lock contains only an integer key allocator and is not history payload.
+A new worker reconstructs the maximum key from bounded retained metadata when
+needed; history copying does not require copying the lock.
+
+JSONL appends close the file immediately, following upstream's best-effort
+audit behavior; they do not claim power-loss durability. Counter snapshots
+use a synced temporary file and atomic replacement. Audit storage failure
+never disables masking or reveals original values. The RPC error field and
+explicit flush acknowledgement let the native adapter report a static
+diagnostic even when worker stderr is not attached to a journal. An abruptly
+killed worker can lose counter increments still within the five-second window.
+
 ## Public plugin operations
 
 `invoke PROVIDER EVENT --input-file /absolute/request.json` calls an allowlisted public host method. Raw authentication exporters and loader results are unavailable through this command. Public results remove credential fields.

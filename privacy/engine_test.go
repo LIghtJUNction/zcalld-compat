@@ -29,6 +29,11 @@ func testEngine(t *testing.T, s map[string]any) *Engine {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := e.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	return e
 }
 func TestMaskAndRestoreSplitToolArguments(t *testing.T) {

@@ -25,7 +25,7 @@ check() {
   cd "$srcdir/$pkgname-$pkgver"
   ./zcalld-privacy --version
   ./zcalld-pluginctl --version
-  go test -mod=readonly ./privacy ./internal/redact ./internal/lazyre ./internal/pii/guard
+  go test -mod=readonly ./cmd/zcalld-privacy ./privacy ./internal/redact ./internal/lazyre ./internal/pii/guard
 }
 
 package() {

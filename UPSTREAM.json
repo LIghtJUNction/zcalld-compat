@@ -15,6 +15,10 @@
   ],
   "modifications": [
     "Go module import prefix only; zcalld adapters are separate packages",
-    "Upstream eval*_test.go requires full Magpie model download/cache adapter; kept under magpie_model_corpus build tag. Production privacy engine unchanged."
+    "Upstream model corpus predictions run locally; the full-runtime recapture driver is preserved as reference-only testdata/upstream-model-eval.go.txt, not a compiled import of the absent full Magpie model registry. Production redaction engine behavior is unchanged."
+  ],
+  "adapted_contracts": [
+    "internal/maskrec/maskrec.go",
+    "internal/maskrec/checked.go"
   ]
 }

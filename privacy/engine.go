@@ -22,9 +22,10 @@ import (
 const Limit = 16 << 20
 
 type Config struct {
-	Settings string `json:"settings"`
-	Key      string `json:"key"`
-	ModelDir string `json:"model_dir"`
+	Settings   string `json:"settings"`
+	Key        string `json:"key"`
+	ModelDir   string `json:"model_dir"`
+	HistoryDir string `json:"history_dir,omitempty"`
 }
 type Settings struct {
 	Enabled *bool `json:"zcalldEnabled"`
@@ -48,13 +49,17 @@ type Settings struct {
 	ModelThresholds map[string]float64 `json:"redactModelScore"`
 }
 type Result struct {
-	Enabled bool   `json:"enabled"`
-	Body    []byte `json:"body"`
-	Count   int    `json:"count,omitempty"`
-	Blocked bool   `json:"blocked,omitempty"`
-	Model   string `json:"model,omitempty"`
+	Enabled    bool   `json:"enabled"`
+	Body       []byte `json:"body"`
+	Count      int    `json:"count,omitempty"`
+	Blocked    bool   `json:"blocked,omitempty"`
+	Model      string `json:"model,omitempty"`
+	AuditError string `json:"audit_error,omitempty"`
 }
-type Engine struct{ config Config }
+type Engine struct {
+	config Config
+	audit  *auditStore
+}
 
 var keyLock sync.Mutex
 var keyPath string
@@ -81,7 +86,13 @@ func New(c Config) (*Engine, error) {
 	}
 	redact.SetKeyPath(c.Key)
 	keyPath = c.Key
-	return &Engine{c}, nil
+	if c.HistoryDir == "" {
+		c.HistoryDir = filepath.Join(filepath.Dir(c.Settings), "history")
+	}
+	if !filepath.IsAbs(c.HistoryDir) {
+		return nil, errors.New("privacy history path must be absolute")
+	}
+	return &Engine{config: c, audit: newAuditStore(c.HistoryDir)}, nil
 }
 func readSettings(p string) (Settings, error) {
 	var s Settings
@@ -99,14 +110,21 @@ func readSettings(p string) (Settings, error) {
 	}
 	return s, nil
 }
-func (e *Engine) Mask(body []byte, route string) (r Result, err error) {
+func (e *Engine) Close() error { return e.audit.close() }
+func (e *Engine) Flush() error { return e.audit.flush() }
+
+func (e *Engine) Mask(body []byte, route string) (Result, error) {
+	return e.MaskWithContext(body, route, Context{})
+}
+
+func (e *Engine) MaskWithContext(body []byte, route string, context Context) (r Result, err error) {
 	defer func() {
 		if recover() != nil {
 			r = Result{}
 			err = errors.New("privacy model failed; request held back")
 		}
 	}()
-	if len(body) > Limit || !json.Valid(body) {
+	if len(body) > Limit || !json.Valid(body) || !context.valid() {
 		return r, errors.New("invalid privacy request")
 	}
 	s, err := readSettings(e.config.Settings)
@@ -122,7 +140,9 @@ func (e *Engine) Mask(body []byte, route string) (r Result, err error) {
 		return r, errors.New("privacy custom rules are invalid")
 	}
 	o := redact.Options{Secrets: s.Secrets, Personal: s.Personal, Words: s.Words, WordsAnyCase: s.WordsAnyCase, WordsWhole: s.WordsWhole, Rules: rules, Kinds: s.Kinds, Actions: s.Actions, Allow: s.Allow, Shape: s.Shape, Route: route}
+	var hits auditHits
 	o.Seen = func(h redact.Hit) {
+		hits.add(h)
 		if h.Action == "block" {
 			r.Blocked = true
 		}
@@ -181,12 +201,16 @@ func (e *Engine) Mask(body []byte, route string) (r Result, err error) {
 		}
 	}
 	r.Body, r.Count = redact.MaskJSON(body, o)
+	if !r.Blocked && len(r.Body) > Limit {
+		return Result{}, errors.New("masked request exceeds limit")
+	}
+	if r.Count > 0 || len(hits.values) > 0 || hasAuditContent(body) {
+		if err := e.audit.note(context, hits, r.Count, r.Blocked); err != nil {
+			r.AuditError = err.Error()
+		}
+	}
 	if r.Blocked {
 		r.Body = nil
-		return r, nil
-	}
-	if len(r.Body) > Limit {
-		return Result{}, errors.New("masked request exceeds limit")
 	}
 	return r, nil
 }
