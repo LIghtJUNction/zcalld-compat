@@ -3767,6 +3767,60 @@ async function doCodexHttp(id, record, params) {
   } finally { clearTimeout(timer) }
 }
 
+// Dedicated management usage read. It accepts an explicit existing account and
+// fixed deadline only; no loader, refresh, options, header hook or URL input.
+function codexUsageScope(key) {
+  const provider = "builtin:codex"
+  if (typeof key !== "string" || !key || key.length > 256 || providerOf(key) !== provider ||
+      /[\u0000-\u0020\u007f]/u.test(key)) throw new Error("Codex usage requires an explicit account")
+  const registry = readPolicyRegistry(), meta = registry.accounts?.[key]
+  if (!Object.hasOwn(registry.accounts ?? {}, key) || meta?.enabled !== true)
+    throw new Error("The selected Codex account is unavailable or disabled")
+  const plugin = auths().get(provider)
+  const entries = Array.isArray(registry.plugins) ? registry.plugins.filter(entry =>
+    entry.name === "builtin-codex" && entry.source === "builtin-codex" &&
+    entry.kind === "community" && entry.enabled === true &&
+    entry.path === plugin?.target && entry.source === plugin?.spec) : []
+  if (entries.length !== 1) throw new Error("The builtin Codex adapter changed")
+  const state = readAuthState()
+  if (!state.known || !state.own || !Object.hasOwn(state.all, key))
+    throw new Error("Current Codex credentials are unavailable")
+  const auth = structuredClone(state.all[key])
+  if (!auth || auth.type !== "oauth") throw new Error("The selected Codex account is unavailable")
+  return { auth, stamp: JSON.stringify([key, meta, entries[0], auth]) }
+}
+async function codexUsageOf(params, signal) {
+  let controller, timer, stop
+  try {
+    if (!params || Object.keys(params).some(name => !["account", "deadline_ms"].includes(name)))
+      throw new Error("Unsupported Codex usage input")
+    const remaining = params.deadline_ms - Date.now()
+    if (!Number.isSafeInteger(params.deadline_ms) || remaining <= 0 || remaining > 30000)
+      throw new Error("Codex usage deadline is invalid")
+    const scope = codexUsageScope(params.account)
+    const hook = auths().get("builtin:codex")?.auth?.codexQuota
+    if (typeof hook !== "function") throw new Error("Installed Codex adapter has no read-only usage capability")
+    controller = new AbortController()
+    stop = () => controller.abort(signal?.reason)
+    signal?.addEventListener("abort", stop, { once: true })
+    if (signal?.aborted) stop()
+    timer = setTimeout(() => controller.abort(), Math.ceil(remaining))
+    // The Go launcher attests the exact embedded module. This hook resolves
+    // external auth read-only and calls only the fixed metadata usage endpoint.
+    const result = await hook(scope.auth, { timeout_ms: Math.ceil(remaining), signal: controller.signal })
+    if (controller.signal.aborted) return { ok: false, error: "timeout" }
+    if (codexUsageScope(params.account).stamp !== scope.stamp)
+      return { ok: false, error: "account_or_plugin_changed" }
+    return result
+  } catch {
+    return { ok: false, error: controller?.signal.aborted ? "timeout" : "account_or_plugin_changed" }
+  } finally {
+    clearTimeout(timer)
+    if (stop) signal?.removeEventListener("abort", stop)
+    controller?.abort()
+  }
+}
+
 async function maintenanceOf(operation, params, signal) {
   const provider = "builtin:codex", key = params.account
   if (typeof key !== "string" || !/^builtin:codex#[a-f0-9]{20}$/u.test(key))
@@ -3796,6 +3850,13 @@ async function maintenanceOf(operation, params, signal) {
         expected_expires_at: params.expected_expires_at, lead_minutes: params.lead_minutes }
       return await hook(authCopy(key), request, {
         noCredits: policy.codex_no_credits, assertCurrent: policy.assertCurrent,
+        readAuth: () => {
+          policy.assertCurrent()
+          const state = readAuthState()
+          if (!state.known || !state.own || !Object.hasOwn(state.all, key))
+            throw new Error("Current Codex credentials are unavailable")
+          return structuredClone(state.all[key])
+        },
         generation: async (input) => {
           policy.assertCurrent()
           const record = { state: "setup", controller, gate: makeGate(512 << 10),
@@ -3880,6 +3941,7 @@ const handlers = {
   installCli,
   load,
   usage,
+  "codex.usage": (p, signal) => codexUsageOf(p, signal),
   "maintenance.inspect": (p, signal) => maintenanceOf("inspect", p, signal),
   "maintenance.warmup": (p, signal) => maintenanceOf("warmup", p, signal),
   "maintenance.consume": (p, signal) => maintenanceOf("consume", p, signal),

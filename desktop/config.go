@@ -94,6 +94,9 @@ func decodeConfig(data []byte, parent string) (Config, error) {
 	}
 	switch config.Language {
 	case "":
+		if raw, exists := fields["language"]; exists && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return Config{}, ErrConfig
+		}
 		config.Language = "en"
 	case "en", "zh", "zh-CN", "zh-TW", "ja", "de":
 	default:
@@ -101,6 +104,9 @@ func decodeConfig(data []byte, parent string) (Config, error) {
 	}
 	switch config.Backend {
 	case "":
+		if raw, exists := fields["backend"]; exists && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return Config{}, ErrConfig
+		}
 		config.Backend = "native"
 	case "native", "record":
 	default:

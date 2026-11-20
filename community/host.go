@@ -68,9 +68,38 @@ func startHost(root, source string, deadline time.Time) (*Host, error) {
 }
 
 func startHostBudget(root, source string, deadline, drainDeadline time.Time) (*Host, error) {
+	return startHostSelected(root, source, deadline, drainDeadline, nil)
+}
+func sameHostEntry(a, b Entry) bool {
+	left, e := json.Marshal(a)
+	if e != nil {
+		return false
+	}
+	right, e := json.Marshal(b)
+	return e == nil && string(left) == string(right)
+}
+func startPinnedHostBudget(root string, entry Entry, deadline, drainDeadline time.Time) (*Host, error) {
+	return startHostSelected(root, entry.Source, deadline, drainDeadline, &entry)
+}
+func startHostSelected(root, source string, deadline, drainDeadline time.Time, pinned *Entry) (*Host, error) {
 	r, err := Read(root)
 	if err != nil {
 		return nil, err
+	}
+	if pinned != nil {
+		count := 0
+		for _, entry := range r.Plugins {
+			if entry.Name == pinned.Name {
+				if !sameHostEntry(entry, *pinned) || !entry.Enabled || entry.Kind != "community" {
+					return nil, errors.New("selected builtin entry changed before launch")
+				}
+				count++
+			}
+		}
+		if count != 1 {
+			return nil, errors.New("selected builtin entry is unavailable")
+		}
+		r.Plugins = []Entry{*pinned}
 	}
 	host, pi, err := Scripts(root)
 	if err != nil {
@@ -112,6 +141,10 @@ func startHostBudget(root, source string, deadline, drainDeadline time.Time) (*H
 	if err = h.callUntil("init", params, &loaded, deadline); err != nil {
 		h.Close()
 		return nil, err
+	}
+	if pinned != nil && len(loaded.Plugins) != 1 {
+		h.Close()
+		return nil, errors.New("selected builtin entry did not initialize")
 	}
 	for _, p := range loaded.Plugins {
 		if p.Error != "" {

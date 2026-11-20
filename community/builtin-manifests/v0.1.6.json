@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "release": "0.1.6",
+  "commit": "e4dffde8012a9120df00d2b7b93e19933007a19f",
+  "bundle_sha256": "8d1b83c667316f389687dff918daa77a1ac9d8666573581e57a9a96ef13f0607",
+  "files": [
+    {
+      "name": "antigravity.mjs",
+      "bytes": 144,
+      "sha256": "4d7bc2b4d014b30e03f8d7808e525de1edcd86bfac7f5ccdcc9721b7978534f8"
+    },
+    {
+      "name": "catalog.json",
+      "bytes": 15864,
+      "sha256": "e3af0cc05ec1c7c73ca7e36001df5441417b8a18053b27bf7f28049b3cd85975"
+    },
+    {
+      "name": "codeassist-impl.mjs",
+      "bytes": 8947,
+      "sha256": "1bf496c1e295b9fefb0c438b617365ec312ce6fe034ebcd2c5c8c3fe4f9c2921"
+    },
+    {
+      "name": "codeassist.mjs",
+      "bytes": 251,
+      "sha256": "f8cec9321f68e71b266853b9cfd99ac9efba9bb9fa794eae48f520255a553d14"
+    },
+    {
+      "name": "codex-impl.mjs",
+      "bytes": 14975,
+      "sha256": "2d1d80932927bd49f569f2572f920945cdb04d3c232ae108e8691c31c2f87425"
+    },
+    {
+      "name": "codex.mjs",
+      "bytes": 236,
+      "sha256": "c399082e655078c19d35de2ec213499a41fe4e06dd4fe3bdb29cd649fc2c7ab5"
+    },
+    {
+      "name": "common.mjs",
+      "bytes": 7434,
+      "sha256": "8057393352f68b99867fedddfdf1069ffc67e7d7a5016a3300ff39f796b03bda"
+    },
+    {
+      "name": "copilot-impl.mjs",
+      "bytes": 5653,
+      "sha256": "06454ecbced51612b02f2703cd8b97d7cd1a9de7e90811de442a26899a9af0ae"
+    },
+    {
+      "name": "copilot.mjs",
+      "bytes": 242,
+      "sha256": "63e43593815020f5fbba4f95b0a8a4dbadb50aaf86e3a47b516c2d01fcb2a3c4"
+    }
+  ]
+}
