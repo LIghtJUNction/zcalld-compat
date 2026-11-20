@@ -99,6 +99,9 @@ export function codexQuotaIdentity(auth, account) {
 export function createCodexCreditGuard({ readUsage, now = Date.now }) {
   const cache = new Map()
   const pending = new Map()
+  // Invalidated flights still count until they settle, including a test or
+  // provider transport that is slow to honor cancellation.
+  const flights = new Set()
   let revision = 0
   function remember(identity, parsed) {
     cache.delete(identity)
@@ -110,16 +113,20 @@ export function createCodexCreditGuard({ readUsage, now = Date.now }) {
   function acquire(identity, auth, account) {
     const existing = pending.get(identity)
     if (existing && !existing.controller.signal.aborted) return existing
-    if (!existing && pending.size >= MAX_IDENTITIES) return null
+    if (flights.size >= MAX_IDENTITIES) return null
     const flight = { controller: new AbortController(), waiters: new Set(), settled: false, started: revision }
     pending.set(identity, flight)
+    flights.add(flight)
     flight.promise = (async () => {
       try {
         const response = await readUsage(auth, {
           operation: 'usage', account_hint: account, timeout_ms: USAGE_TIMEOUT_MS,
           max_response_bytes: MAX_USAGE_BYTES, signal: flight.controller.signal,
         })
-        if (flight.controller.signal.aborted) throw abortReason(flight.controller.signal)
+        if (flight.controller.signal.aborted) {
+          void response.body?.cancel().catch(() => {})
+          throw abortReason(flight.controller.signal)
+        }
         if (!response.ok) {
           void response.body?.cancel().catch(() => {})
           throw new Error('usage unavailable')
@@ -145,6 +152,9 @@ export function createCodexCreditGuard({ readUsage, now = Date.now }) {
         const bytes = new Uint8Array(length)
         let offset = 0
         for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
+        // A confirmed reset invalidates the entire old flight, including a
+        // body reader that completed after cancellation. It cannot refill cache.
+        if (flight.controller.signal.aborted) throw abortReason(flight.controller.signal)
         const parsed = codexQuotaWindows(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)), now())
         const newer = cache.get(identity)
         // A generation that finished while this GET was pending can supply a
@@ -154,6 +164,7 @@ export function createCodexCreditGuard({ readUsage, now = Date.now }) {
         return parsed
       } finally {
         flight.settled = true
+        flights.delete(flight)
         if (pending.get(identity) === flight) pending.delete(identity)
       }
     })()
@@ -184,6 +195,13 @@ export function createCodexCreditGuard({ readUsage, now = Date.now }) {
     })
   }
   return {
+    // Only the host's confirmed-reset intent calls this. Invalidation grants
+    // no permission: check() must obtain a new verified usage result.
+    invalidate(auth, account) {
+      const identity = codexQuotaIdentity(auth, account)
+      cache.delete(identity)
+      pending.get(identity)?.controller.abort()
+    },
     async check(auth, account, signal) {
       if (signal?.aborted) throw abortReason(signal)
       if (typeof account !== 'string' || !account || account.length > 256) return unknown()

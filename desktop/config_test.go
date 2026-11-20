@@ -52,6 +52,7 @@ func TestReadConfigIsExplicitAndReadOnly(t *testing.T) {
 	for _, fields := range []map[string]any{
 		{"usage_alert": 85}, {"enabled": false, "usage_alert": 85},
 		{"enabled": true, "mask_alert": true},
+		{"enabled": true, "keep_awake": nil, "keep_display": nil, "usage_alert": nil, "balance_alert": nil, "reset_reminder_hours": nil, "turn_done_seconds": nil, "mask_alert": nil, "language": nil, "backend": nil, "notification_helper": nil},
 	} {
 		b, _ := json.Marshal(fields)
 		writePrivate(t, path, b)
@@ -84,7 +85,7 @@ func TestReadConfigRejectsInvalidSchemaAndBounds(t *testing.T) {
 		`{"enabled":null}`, `{"enabled":"yes"}`, `{"usage_alert":100.1}`,
 		`{"usage_alert":101}`, `{"balance_alert":-1}`, `{"balance_alert":1e999}`,
 		`{"reset_reminder_hours":8785}`, `{"turn_done_seconds":86401}`,
-		`{"language":"xx"}`, `{"backend":"shell"}`, `{"unknown":"PRIVATE"}`,
+		`{"language":"xx"}`, `{"backend":"shell"}`, `{"language":""}`, `{"backend":""}`, `{"unknown":"PRIVATE"}`,
 		`{"inbox":null}`, `{"inbox":""}`, `{"state_dir":"../other"}`,
 		`{"notification_helper":""}`, `{"notification_helper":"relative"}`,
 		`{}{}`, `[]`, strings.Repeat(" ", MaxConfigBytes+1),

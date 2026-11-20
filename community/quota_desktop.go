@@ -60,6 +60,9 @@ func quotaDesktopObservation(account string, reading quotaReading, now time.Time
 	}
 	event := quotaDesktopEvent{Version: 1, SourceID: quotaDigest("zcalld:quota-account:v1\x00" + account),
 		ObservedAt: at.UnixMilli(), Fresh: true, Success: true, Windows: []quotaDesktopWindow{}}
+	if reading.codex {
+		event.SourceID = quotaDigest("zcalld:codex-account:v1\x00" + account)
+	}
 	identities := map[string]int{}
 	for _, w := range reading.Windows {
 		if w.Name != "" {
@@ -78,6 +81,11 @@ func quotaDesktopObservation(account string, reading quotaReading, now time.Time
 			continue
 		}
 		item := quotaDesktopWindow{ID: quotaDigest("zcalld:quota-window:v1\x00" + identity), Used: *used}
+		if reading.codex {
+			item.ID = w.Name
+			item.Pool = "account"
+			item.SpanSeconds = w.SpanSeconds
+		}
 		if reset, err := time.Parse(time.RFC3339Nano, w.ResetsAt); err == nil {
 			// A window with an already elapsed reset is not a current threshold
 			// observation. Unknown reset remains usable for usage thresholds only.

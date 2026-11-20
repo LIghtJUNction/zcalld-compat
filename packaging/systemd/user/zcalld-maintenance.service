@@ -1,0 +1,12 @@
+[Unit]
+Description=Optional bounded zcalld account maintenance
+Documentation=https://github.com/LIghtJUNction/zcalld-compat/blob/main/docs/CODEX-MAINTENANCE.md
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/zcalld plugins maintenance run-once
+TimeoutStartSec=75s
+TimeoutStopSec=10s
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=yes

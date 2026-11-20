@@ -1,6 +1,7 @@
 package community
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -25,22 +26,52 @@ func (h *Host) drainRemaining() time.Duration {
 // EOF then keeps the host alive for the same single credential checkpoint
 // budget reused by Close, without concurrent scanner and drain readers.
 func (h *Host) callUntil(method string, params, out any, deadline time.Time) error {
-	if deadline.IsZero() {
+	return h.callUntilContext(context.Background(), method, params, out, deadline)
+}
+
+// Cancellation aborts only this operation and then permits the same bounded
+// credential checkpoint used on a timeout. It does not kill a refreshing host
+// immediately, nor start a new drain budget when Close is called afterwards.
+func (h *Host) callUntilContext(ctx context.Context, method string, params, out any, deadline time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if contextDeadline, ok := ctx.Deadline(); ok && (deadline.IsZero() || contextDeadline.Before(deadline)) {
+		deadline = contextDeadline
+	}
+	if deadline.IsZero() && ctx.Done() == nil {
 		return h.Call(method, params, out)
 	}
-	remaining := time.Until(deadline)
-	if remaining <= 0 {
+	if !deadline.IsZero() && time.Until(deadline) <= 0 {
 		return errHostDeadline
 	}
 	id := h.next + 1
 	done := make(chan error, 1)
 	go func() { done <- h.Call(method, params, out) }()
-	timer := time.NewTimer(remaining)
-	defer timer.Stop()
+	var timedOut <-chan time.Time
+	if !deadline.IsZero() {
+		timer := time.NewTimer(time.Until(deadline))
+		defer timer.Stop()
+		timedOut = timer.C
+	}
+	result := errHostDeadline
 	select {
 	case err := <-done:
 		return err
-	case <-timer.C:
+	case <-timedOut:
+	case <-ctx.Done():
+		result = ctx.Err()
+	}
+	// Early caller cancellation must not inherit an operation's unused minute.
+	// Cap an existing total deadline, preserving a shorter previously reserved
+	// remainder and the shortened grace used by real subprocess fixtures.
+	grace := h.drainGrace
+	if grace <= 0 {
+		grace = 35 * time.Second
+	}
+	cap := time.Now().Add(grace)
+	if h.drainDeadline.IsZero() || cap.Before(h.drainDeadline) {
+		h.drainDeadline = cap
 	}
 	h.drainRemaining() // starts the one shutdown budget before any pipe write
 	aborted := make(chan struct{})
@@ -66,5 +97,5 @@ func (h *Host) callUntil(method string, params, out any, deadline time.Time) err
 		}
 		<-done
 	}
-	return errHostDeadline
+	return result
 }

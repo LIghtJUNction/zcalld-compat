@@ -9,11 +9,19 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/LIghtJUNction/zcalld-compat/internal/privatefile"
 )
 
 func runtimeFixture(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := privatefile.Protect(root, 0700); err != nil {
+		t.Fatal(err)
+	}
 	bin := t.TempDir()
 	name := "bun"
 	if runtime.GOOS == "windows" {
@@ -40,19 +48,20 @@ func runtimeJSON(t *testing.T, data []byte) map[string]any {
 
 func TestRuntimeRefreshesOnlyOwnedBuiltinPathsAndPreservesState(t *testing.T) {
 	root := runtimeFixture(t)
-	old := filepath.Join(root, "runtime", "builtin", strings.Repeat("a", 24))
+	old, sums := legacyBuiltinFixture(t, root)
 	entries := []map[string]any{
 		{"name": "builtin-codex", "kind": "community", "source": "builtin-codex",
-			"path": filepath.Join(old, "codex.mjs"), "sha256": "old", "enabled": false,
+			"path": filepath.Join(old, "codex.mjs"), "sha256": sums["codex.mjs"], "enabled": false,
 			"version": "kept-version", "options": map[string]any{"keep": true}, "future": json.Number("9007199254740993")},
 		{"name": "builtin-gemini", "kind": "community", "source": "builtin-gemini",
-			"path": filepath.Join(old, "codeassist.mjs"), "sha256": "old", "enabled": true},
+			"path": filepath.Join(old, "codeassist.mjs"), "sha256": sums["codeassist.mjs"], "enabled": true},
 		{"name": "community", "kind": "community", "source": "local",
 			"path": filepath.Join(root, "community.mjs"), "enabled": true, "unknown": []any{"kept"}},
 	}
 	registry := map[string]any{
 		"version": 1, "plugins": entries, "accounts": map[string]any{"fixture-account": map[string]any{"enabled": false, "unknown": true}},
 		"account_defaults":  map[string]any{"builtin:codex": "fixture-account"},
+		"account_policies":  map[string]any{"fixture-account": map[string]any{"codex_no_credits": true}},
 		"mcp_tools_enabled": true, "future": map[string]any{"large": json.Number("9007199254740993")},
 	}
 	before, _ := json.Marshal(registry)
@@ -90,6 +99,18 @@ func TestRuntimeRefreshesOnlyOwnedBuiltinPathsAndPreservesState(t *testing.T) {
 	if !reflect.DeepEqual(after, runtimeJSON(t, before)) {
 		t.Fatal("runtime refresh changed unrelated registry state")
 	}
+	hostBytes, err := os.ReadFile(filepath.Join(root, "host.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper, err = filepath.EvalSymlinks(helper)
+	if err != nil || runtimeJSON(t, hostBytes)["pluginctl"] != helper {
+		t.Fatal("runtime binding did not pin the running helper")
+	}
 	gotAuth, _ := os.ReadFile(filepath.Join(root, "plugin-auth.json"))
 	if !bytes.Equal(gotAuth, auth) {
 		t.Fatal("runtime refresh changed account credentials")
@@ -116,8 +137,8 @@ func TestRuntimeDoesNotAdoptOtherPluginsOrAddBuiltinEntries(t *testing.T) {
 	if err := Atomic(filepath.Join(root, "registry.json"), before, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := ConfigureRuntime(root); err != nil {
-		t.Fatal(err)
+	if err := ConfigureRuntime(root); err == nil {
+		t.Fatal("unverified same-named adapters must be rejected")
 	}
 	after, _ := os.ReadFile(filepath.Join(root, "registry.json"))
 	if !bytes.Equal(after, before) {

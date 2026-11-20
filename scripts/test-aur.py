@@ -31,16 +31,18 @@ class AURRevisionTests(unittest.TestCase):
             out = Path(temp)
             release.render_aur(out, release.version(), "a" * 64)
             recipe = (out / "PKGBUILD").read_text()
-            match = re.search(r"^depends=\(([^)]*)\)$", recipe, re.MULTILINE)
-            self.assertIsNotNone(match)
-            recipe_dependencies = shlex.split(match.group(1))
-            index_dependencies = [
-                line.split("=", 1)[1].strip()
-                for line in (out / ".SRCINFO").read_text().splitlines()
-                if line.strip().startswith("depends =")
-            ]
-            self.assertIn("zcalld>=0.4.0", recipe_dependencies)
-            self.assertCountEqual(index_dependencies, recipe_dependencies)
+            source_info = (out / ".SRCINFO").read_text()
+            for field, required in (("depends", "zcalld>=0.4.0"), ("checkdepends", "python")):
+                match = re.search(r"^" + field + r"=\(([^)]*)\)$", recipe, re.MULTILINE)
+                self.assertIsNotNone(match)
+                recipe_dependencies = shlex.split(match.group(1))
+                index_dependencies = [
+                    line.split("=", 1)[1].strip()
+                    for line in source_info.splitlines()
+                    if line.strip().startswith(field + " =")
+                ]
+                self.assertIn(required, recipe_dependencies)
+                self.assertCountEqual(index_dependencies, recipe_dependencies)
 
     def test_revisions_cannot_downgrade_or_mutate_same_revision(self):
         with self.assertRaises(SystemExit):

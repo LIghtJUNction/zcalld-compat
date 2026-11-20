@@ -39,9 +39,14 @@ func Protect(path string, mode os.FileMode) error {
 		nil, nil, acl, nil)
 }
 
-func Check(path string) bool {
+func Check(path string) bool { return checkNode(path, false) }
+
+// CheckDirectory uses the same owner/DACL contract as Check.
+func CheckDirectory(path string) bool { return checkNode(path, true) }
+
+func checkNode(path string, directory bool) bool {
 	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() {
+	if err != nil || (directory && !info.IsDir()) || (!directory && !info.Mode().IsRegular()) {
 		return false
 	}
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()

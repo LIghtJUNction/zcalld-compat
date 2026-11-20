@@ -6,6 +6,7 @@ pkgbase = zcalld-compat
 	arch = x86_64
 	arch = aarch64
 	license = MIT
+	checkdepends = python
 	makedepends = go>=1.26.8
 	depends = glibc
 	depends = zcalld>=0.4.0

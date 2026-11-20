@@ -24,18 +24,20 @@ type quotaCapability struct {
 	Usage bool   `json:"usage"`
 }
 type quotaWindow struct {
-	Name      string   `json:"name"`
-	Used      *float64 `json:"used"`
-	ResetsAt  string   `json:"resetsAt,omitempty"`
-	ResetSecs float64  `json:"resetSecs,omitempty"`
-	Amount    *float64 `json:"amount,omitempty"`
-	Limit     *float64 `json:"limit,omitempty"`
-	Unit      string   `json:"unit,omitempty"`
-	Balance   *float64 `json:"balance,omitempty"`
+	Name        string   `json:"name"`
+	Used        *float64 `json:"used"`
+	ResetsAt    string   `json:"resetsAt,omitempty"`
+	ResetSecs   float64  `json:"resetSecs,omitempty"`
+	SpanSeconds float64  `json:"span_seconds,omitempty"`
+	Amount      *float64 `json:"amount,omitempty"`
+	Limit       *float64 `json:"limit,omitempty"`
+	Unit        string   `json:"unit,omitempty"`
+	Balance     *float64 `json:"balance,omitempty"`
 }
 type quotaReading struct {
 	At      string        `json:"at"`
 	Windows []quotaWindow `json:"windows"`
+	codex   bool
 }
 type quotaCache struct {
 	Version  int                     `json:"version"`
@@ -184,7 +186,7 @@ func quotaEntry(r Registry, capability quotaCapability) (Entry, string) {
 	return matches[0], ""
 }
 
-func quotaAccount(r Registry, all map[string]any, caps map[string]quotaCapability, id string) (Entry, string) {
+func quotaAccount(root string, r Registry, all map[string]any, caps map[string]quotaCapability, id string) (Entry, string) {
 	auth, ok := all[id].(map[string]any)
 	provider := accountProvider(id)
 	if !ok || len(auth) == 0 || !validAccount(id, provider) {
@@ -192,6 +194,22 @@ func quotaAccount(r Registry, all map[string]any, caps map[string]quotaCapabilit
 	}
 	if !r.Accounts[id].Enabled {
 		return Entry{}, "account_disabled"
+	}
+	if provider == "builtin:codex" {
+		if auth["type"] != "oauth" {
+			return Entry{}, "account_unavailable"
+		}
+		// Explicit native accounts may not be enabled solely by in-memory legacy
+		// defaults. The host rechecks this same private registry before its GET.
+		actual, err := Read(root)
+		if err != nil {
+			return Entry{}, "account_unavailable"
+		}
+		meta, exists := actual.Accounts[id]
+		if !exists || !meta.Enabled {
+			return Entry{}, "account_disabled"
+		}
+		return verifiedBuiltinCodex(root, actual)
 	}
 	c, known := caps[provider]
 	if !known {
@@ -232,7 +250,7 @@ func QuotaList(root string) (map[string]any, error) {
 	accounts := []any{}
 	readings := []any{}
 	for _, id := range ids {
-		_, reason := quotaAccount(r, all, caps, id)
+		_, reason := quotaAccount(root, r, all, caps, id)
 		label := quotaText(r.Accounts[id].Label, 180)
 		if label == "" {
 			label = quotaText(id, 180)
@@ -252,6 +270,9 @@ type quotaCaller func(root string, entry Entry, provider, account string) (quota
 
 func callQuota(root string, entry Entry, provider, account string) (quotaReading, error) {
 	deadline := time.Now().Add(quotaTimeout)
+	if provider == "builtin:codex" {
+		return callBuiltinQuota(root, entry, account, deadline)
+	}
 	h, e := startHost(root, entry.Source, deadline)
 	if e != nil {
 		return quotaReading{}, e
@@ -294,7 +315,14 @@ func callQuota(root string, entry Entry, provider, account string) (quotaReading
 }
 
 func quotaFailure(code string) map[string]any {
-	return map[string]any{"ok": false, "error": code, "message": "Quota update was not completed; previous cached readings were kept.", "cache_preserved": true}
+	message := "Quota update was not completed; previous cached readings were kept."
+	if code == "builtin_runtime_outdated" {
+		message = "Run zcalld plugins runtime configure for this configuration to activate the installed builtin adapters; saved accounts and credentials are preserved."
+	}
+	if code == "native_auth_unavailable" {
+		message = "The native Codex sign-in is expired, unavailable, or changed. Renew it in its native owner; the previous quota cache was kept."
+	}
+	return map[string]any{"ok": false, "error": code, "message": message, "cache_preserved": true}
 }
 func QuotaRefresh(root, account string) (map[string]any, error) {
 	return quotaRefresh(root, account, callQuota)
@@ -312,7 +340,7 @@ func quotaRefresh(root, account string, call quotaCaller) (map[string]any, error
 		return nil, e
 	}
 	seedAccounts(root, &r, all)
-	entry, reason := quotaAccount(r, all, quotaCapabilities(root), account)
+	entry, reason := quotaAccount(root, r, all, quotaCapabilities(root), account)
 	if reason != "" {
 		return quotaFailure(reason), nil
 	}
@@ -320,6 +348,10 @@ func quotaRefresh(root, account string, call quotaCaller) (map[string]any, error
 	if e != nil {
 		if errors.Is(e, errHostDeadline) {
 			return quotaFailure("timeout"), nil
+		}
+		var native nativeQuotaError
+		if errors.As(e, &native) {
+			return quotaFailure(nativeQuotaCode(string(native))), nil
 		}
 		return quotaFailure("provider_error"), nil
 	}
@@ -337,8 +369,11 @@ func quotaRefresh(root, account string, call quotaCaller) (map[string]any, error
 		return nil, e
 	}
 	seedAccounts(root, &current, currentAuth)
-	now, reason := quotaAccount(current, currentAuth, quotaCapabilities(root), account)
+	now, reason := quotaAccount(root, current, currentAuth, quotaCapabilities(root), account)
 	if reason != "" || now.Path != entry.Path || now.SHA256 != entry.SHA256 || now.Source != entry.Source {
+		return quotaFailure("account_or_plugin_changed"), nil
+	}
+	if reading.codex && !sameQuotaAuth(all[account], currentAuth[account]) {
 		return quotaFailure("account_or_plugin_changed"), nil
 	}
 	cache, e := readQuotaCache(root)

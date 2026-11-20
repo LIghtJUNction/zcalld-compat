@@ -5,11 +5,15 @@ build:
 	go build -mod=readonly -trimpath -ldflags "$(FLAGS)" -o bin/zcalld-privacy ./cmd/zcalld-privacy
 	go build -mod=readonly -trimpath -ldflags "$(FLAGS)" -o bin/zcalld-pluginctl ./cmd/zcalld-pluginctl
 check:
-	go test -mod=readonly ./cmd/zcalld-privacy ./privacy ./community ./builtin ./routing ./internal/privatefile ./internal/redact ./internal/lazyre ./internal/pii/guard
-	go vet -mod=readonly ./privacy ./community ./builtin ./routing ./internal/privatefile ./cmd/...
+	go test -mod=readonly ./cmd/zcalld-privacy ./privacy ./community ./builtin ./routing ./desktop ./maintenance ./internal/privatefile ./internal/redact ./internal/lazyre ./internal/pii/guard
+	go vet -mod=readonly ./privacy ./community ./builtin ./routing ./desktop ./maintenance ./internal/privatefile ./cmd/...
 	bun test community/builtin/tests community/tests
 	python3 -c "import ast,pathlib; [ast.parse(p.read_text()) for p in pathlib.Path('scripts').glob('*.py')]"
 	python3 scripts/test-aur.py
+	python3 scripts/test-package.py
+	mkdir -p bin
+	go build -mod=readonly -trimpath -ldflags "$(FLAGS)" -o bin/zcalld-pluginctl ./cmd/zcalld-pluginctl
+	python3 scripts/test-maintenance.py bin/zcalld-pluginctl
 dist:
 	python3 scripts/release.py build --target all
 	python3 scripts/release.py stage

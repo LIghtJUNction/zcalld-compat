@@ -381,10 +381,11 @@ function codexPolicyState(key) {
   return { restricted, stamp: JSON.stringify([key, meta, entries[0], identity,
     registry.account_defaults?.["builtin:codex"] ?? null, restricted]) }
 }
-function codexAccountPolicy(key) {
+function codexAccountPolicy(key, freshQuota = false) {
   const frozen = codexPolicyState(key)
   return Object.freeze({
     codex_no_credits: frozen.restricted,
+    fresh_quota: freshQuota,
     assertCurrent() {
       if (codexPolicyState(key).stamp !== frozen.stamp)
         throw new Error("Codex account or credit policy changed before generation; try again with the current configuration")
@@ -3631,7 +3632,14 @@ async function fetchAs(id, record, key, params) {
   // renewed it: a 401 is judged against it (staleAccess)
   const before = key ? readAuth()[key] : undefined
   try {
-    const accountPolicy = provider === "builtin:codex" ? codexAccountPolicy(key) : undefined
+    // This top-level intent is produced only by the native recovery resource.
+    // Body fields and HTTP headers are never used to request invalidation.
+    const freshQuota = Object.hasOwn(params, "zcalld_fresh_quota_account")
+    if (freshQuota && (provider !== "builtin:codex" ||
+        params.zcalld_fresh_quota_account !== key || params.account !== key ||
+        !/^builtin:codex#[a-f0-9]{20}$/u.test(key)))
+      throw new Error("Confirmed Codex reset does not match the explicit account")
+    const accountPolicy = provider === "builtin:codex" ? codexAccountPolicy(key, freshQuota) : undefined
     const o = await options(provider, key)
     checkFetch(record)
     const h = new Headers()
@@ -3688,8 +3696,10 @@ async function fetchAs(id, record, key, params) {
       const said = await staleAccess(key, before)
       if (said) rh["x-magpie-sign-in"] = said
     }
+    if (record.captureResponse === true) { record.unconsumedBody = undefined; return res }
     await relayHttpResponse(id, record, res, rh)
   } catch (e) {
+    if (record.captureResponse === true) { transitionFetch(record, "finishing"); throw e }
     transitionFetch(record, "finishing")
     // a fetch hook that threw on its sign-in (a refresh the vendor turned
     // away) marks the account, as a built-in's refused refresh marked it
@@ -3765,6 +3775,113 @@ async function doCodexHttp(id, record, params) {
   } finally { clearTimeout(timer) }
 }
 
+// Dedicated management usage read. It accepts an explicit existing account and
+// fixed deadline only; no loader, refresh, options, header hook or URL input.
+function codexUsageScope(key) {
+  const provider = "builtin:codex"
+  if (typeof key !== "string" || !key || key.length > 256 || providerOf(key) !== provider ||
+      /[\u0000-\u0020\u007f]/u.test(key)) throw new Error("Codex usage requires an explicit account")
+  const registry = readPolicyRegistry(), meta = registry.accounts?.[key]
+  if (!Object.hasOwn(registry.accounts ?? {}, key) || meta?.enabled !== true)
+    throw new Error("The selected Codex account is unavailable or disabled")
+  const plugin = auths().get(provider)
+  const entries = Array.isArray(registry.plugins) ? registry.plugins.filter(entry =>
+    entry.name === "builtin-codex" && entry.source === "builtin-codex" &&
+    entry.kind === "community" && entry.enabled === true &&
+    entry.path === plugin?.target && entry.source === plugin?.spec) : []
+  if (entries.length !== 1) throw new Error("The builtin Codex adapter changed")
+  const state = readAuthState()
+  if (!state.known || !state.own || !Object.hasOwn(state.all, key))
+    throw new Error("Current Codex credentials are unavailable")
+  const auth = structuredClone(state.all[key])
+  if (!auth || auth.type !== "oauth") throw new Error("The selected Codex account is unavailable")
+  return { auth, stamp: JSON.stringify([key, meta, entries[0], auth]) }
+}
+async function codexUsageOf(params, signal) {
+  let controller, timer, stop
+  try {
+    if (!params || Object.keys(params).some(name => !["account", "deadline_ms"].includes(name)))
+      throw new Error("Unsupported Codex usage input")
+    const remaining = params.deadline_ms - Date.now()
+    if (!Number.isSafeInteger(params.deadline_ms) || remaining <= 0 || remaining > 30000)
+      throw new Error("Codex usage deadline is invalid")
+    const scope = codexUsageScope(params.account)
+    const hook = auths().get("builtin:codex")?.auth?.codexQuota
+    if (typeof hook !== "function") throw new Error("Installed Codex adapter has no read-only usage capability")
+    controller = new AbortController()
+    stop = () => controller.abort(signal?.reason)
+    signal?.addEventListener("abort", stop, { once: true })
+    if (signal?.aborted) stop()
+    timer = setTimeout(() => controller.abort(), Math.ceil(remaining))
+    // The Go launcher attests the exact embedded module. This hook resolves
+    // external auth read-only and calls only the fixed metadata usage endpoint.
+    const result = await hook(scope.auth, { timeout_ms: Math.ceil(remaining), signal: controller.signal })
+    if (controller.signal.aborted) return { ok: false, error: "timeout" }
+    if (codexUsageScope(params.account).stamp !== scope.stamp)
+      return { ok: false, error: "account_or_plugin_changed" }
+    return result
+  } catch {
+    return { ok: false, error: controller?.signal.aborted ? "timeout" : "account_or_plugin_changed" }
+  } finally {
+    clearTimeout(timer)
+    if (stop) signal?.removeEventListener("abort", stop)
+    controller?.abort()
+  }
+}
+
+async function maintenanceOf(operation, params, signal) {
+  const provider = "builtin:codex", key = params.account
+  if (typeof key !== "string" || !/^builtin:codex#[a-f0-9]{20}$/u.test(key))
+    throw new Error("Maintenance requires an explicitly imported Codex account")
+  for (const name of ["url", "prompt", "model", "policy", "no_credits"])
+    if (Object.hasOwn(params, name)) throw new Error("Unsupported maintenance input")
+  const policy = codexAccountPolicy(key)
+  const hook = auths().get(provider)?.auth?.codexMaintenance
+  if (typeof hook !== "function") throw new Error("Installed Codex adapter has no maintenance capability")
+  const remaining = params.deadline_ms - Date.now()
+  if (!Number.isFinite(remaining) || remaining <= 0 || remaining > 60000)
+    throw new Error("Maintenance deadline is invalid")
+  const controller = new AbortController()
+  const stop = () => controller.abort(signal?.reason)
+  signal?.addEventListener("abort", stop, { once: true })
+  if (signal?.aborted) stop()
+  const timer = setTimeout(() => controller.abort(), Math.ceil(remaining))
+  try {
+    return await inScope(provider, key, async () => {
+      // Existing owner-aware refresh may checkpoint after cancellation; the Go
+      // caller reserves the same bounded credential-drain budget for it.
+      await fresh(provider, key)
+      policy.assertCurrent()
+      if (controller.signal.aborted) throw new Error("Maintenance cancelled")
+      const request = { operation, account: key, deadline_ms: params.deadline_ms, signal: controller.signal,
+        windows: params.windows, credit_id: params.credit_id, redeem_request_id: params.redeem_request_id,
+        expected_expires_at: params.expected_expires_at, lead_minutes: params.lead_minutes,
+        purpose: params.purpose, trigger: params.trigger, expected_week_until: params.expected_week_until }
+      return await hook(authCopy(key), request, {
+        noCredits: policy.codex_no_credits, assertCurrent: policy.assertCurrent,
+        readAuth: () => {
+          policy.assertCurrent()
+          const state = readAuthState()
+          if (!state.known || !state.own || !Object.hasOwn(state.all, key))
+            throw new Error("Current Codex credentials are unavailable")
+          return structuredClone(state.all[key])
+        },
+        generation: async (input) => {
+          policy.assertCurrent()
+          const record = { state: "setup", controller, gate: makeGate(512 << 10),
+            pendingSend: null, readyCleanup: null, unconsumedBody: undefined, captureResponse: true }
+          // Same loader, refresh, header hooks and final captured policy as a
+          // normal gateway request. The builtin module owns the fixed prompt.
+          return await fetchAs(0, record, key, { provider, account: key, model: input.model,
+            npm: "@ai-sdk/openai", url: "https://chatgpt.com/backend-api/codex/responses", method: "POST",
+            headers: { "content-type": "application/json" }, body: Buffer.from(JSON.stringify(input)).toString("base64") })
+        },
+      })
+    })
+  } catch { throw new Error("Codex maintenance operation failed") }
+  finally { clearTimeout(timer); signal?.removeEventListener("abort", stop); controller.abort() }
+}
+
 async function doMcpHttp(id, record, params) {
   const timer = setTimeout(() => record.controller.abort(), Math.min(Math.max(params.timeout_ms || 60000, 1), 3600000))
   try {
@@ -3793,6 +3910,8 @@ async function doMcpHttp(id, record, params) {
 // The management CLI keeps its existing partial-load diagnostics.
 let nativeStrictInit = false
 const handlers = {
+  // Native maintenance must confirm this host's shared strict init first.
+  nativeReady: () => null,
   gatewayStates() {
     return Object.fromEntries(gatewayHooks.map(({ spec, state }) => [spec, {
       calls: state.calls, failures: state.failures,
@@ -3833,6 +3952,10 @@ const handlers = {
   installCli,
   load,
   usage,
+  "codex.usage": (p, signal) => codexUsageOf(p, signal),
+  "maintenance.inspect": (p, signal) => maintenanceOf("inspect", p, signal),
+  "maintenance.warmup": (p, signal) => maintenanceOf("warmup", p, signal),
+  "maintenance.consume": (p, signal) => maintenanceOf("consume", p, signal),
   checkin,
   calls,
   keepSignedIn,
@@ -4079,7 +4202,8 @@ rl.on("line", (line) => {
   // sign-in, and a host whose stdin closed must not exit under it.
   const ctl = new AbortController()
   rpcInflight.set(msg.id, ctl)
-  wait
+  const waiting = msg.method === "nativeReady" ? bounded(wait, ctl.signal) : wait
+  waiting
     .then(() => fn(msg.params ?? {}, ctl.signal))
     .then(
       (result) => { if (!ctl.signal.aborted) send({ id: msg.id, result: result ?? null }) },

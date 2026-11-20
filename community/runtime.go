@@ -93,6 +93,22 @@ func refreshedBuiltinRegistry(root string) ([]byte, error) {
 		json.Unmarshal(registry["plugins"], &entries) != nil {
 		return nil, errors.New("unsupported or invalid extension registry")
 	}
+	// Validate all registered builtin candidates before materializing anything.
+	// A same-named external path is not an owned adapter. Unknown/edited bundles
+	// are rejected without changing registry, credentials or the host binding.
+	for _, entry := range entries {
+		_, nameKnown := builtinEntryFiles[rawString(entry["name"])]
+		_, sourceKnown := builtinEntryFiles[rawString(entry["source"])]
+		if !nameKnown && !sourceKnown {
+			continue
+		}
+		if builtinOwnedTarget(root, entry) == "" {
+			return nil, errBuiltinUnverified
+		}
+		if err := verifyBuiltinReference(root, rawString(entry["path"]), rawString(entry["sha256"]), false); err != nil {
+			return nil, err
+		}
+	}
 	var resources map[string]string
 	changed := false
 	for _, entry := range entries {
@@ -101,6 +117,9 @@ func refreshedBuiltinRegistry(root string) ([]byte, error) {
 			continue
 		}
 		if resources == nil {
+			if err := safeBuiltinDestination(root); err != nil {
+				return nil, err
+			}
 			resources, err = BuiltinScripts(root)
 			if err != nil {
 				return nil, err

@@ -64,14 +64,58 @@ func Start(root string) (*Host, error) {
 }
 
 func startHost(root, source string, deadline time.Time) (*Host, error) {
+	return startHostBudget(root, source, deadline, time.Time{})
+}
+
+func startHostBudget(root, source string, deadline, drainDeadline time.Time) (*Host, error) {
+	return startHostSelected(root, source, deadline, drainDeadline, nil)
+}
+func sameHostEntry(a, b Entry) bool {
+	left, e := json.Marshal(a)
+	if e != nil {
+		return false
+	}
+	right, e := json.Marshal(b)
+	return e == nil && string(left) == string(right)
+}
+func startPinnedHostBudget(root string, entry Entry, deadline, drainDeadline time.Time) (*Host, error) {
+	return startHostSelected(root, entry.Source, deadline, drainDeadline, &entry)
+}
+func startHostSelected(root, source string, deadline, drainDeadline time.Time, pinned *Entry) (*Host, error) {
+	return startHostSelectedContext(context.Background(), root, source, deadline, drainDeadline, pinned)
+}
+func startPinnedHostBudgetContext(operationContext context.Context, root string, entry Entry, deadline, drainDeadline time.Time) (*Host, error) {
+	return startHostSelectedContext(operationContext, root, entry.Source, deadline, drainDeadline, &entry)
+}
+func startHostSelectedContext(operationContext context.Context, root, source string, deadline, drainDeadline time.Time, pinned *Entry) (*Host, error) {
+	if err := operationContext.Err(); err != nil {
+		return nil, err
+	}
 	r, err := Read(root)
 	if err != nil {
 		return nil, err
+	}
+	if pinned != nil {
+		count := 0
+		for _, entry := range r.Plugins {
+			if entry.Name == pinned.Name {
+				if !sameHostEntry(entry, *pinned) || !entry.Enabled || entry.Kind != "community" {
+					return nil, errors.New("selected builtin entry changed before launch")
+				}
+				count++
+			}
+		}
+		if count != 1 {
+			return nil, errors.New("selected builtin entry is unavailable")
+		}
+		r.Plugins = []Entry{*pinned}
 	}
 	host, pi, err := Scripts(root)
 	if err != nil {
 		return nil, err
 	}
+	// Parent cancellation goes through the RPC abort/EOF/drain path. Only its
+	// bounded fallback cancels the process, so credential checkpoints may finish.
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, "bun", host)
 	cmd.Dir = root
@@ -92,7 +136,7 @@ func startHost(root, source string, deadline time.Time) (*Host, error) {
 	}
 	scan := bufio.NewScanner(out)
 	scan.Buffer(make([]byte, 65536), 16<<20)
-	h := &Host{cmd: cmd, cancel: cancel, input: in, scan: scan, output: out}
+	h := &Host{cmd: cmd, cancel: cancel, input: in, scan: scan, output: out, drainDeadline: drainDeadline}
 	items := []any{}
 	for _, p := range r.Plugins {
 		if p.Enabled && p.Kind == "community" && (source == "" || p.Source == source) {
@@ -105,15 +149,23 @@ func startHost(root, source string, deadline time.Time) (*Host, error) {
 			Error string `json:"error"`
 		} `json:"plugins"`
 	}
-	if err = h.callUntil("init", params, &loaded, deadline); err != nil {
+	if err = h.callUntilContext(operationContext, "init", params, &loaded, deadline); err != nil {
 		h.Close()
 		return nil, err
+	}
+	if pinned != nil && len(loaded.Plugins) != 1 {
+		h.Close()
+		return nil, errors.New("selected builtin entry did not initialize")
 	}
 	for _, p := range loaded.Plugins {
 		if p.Error != "" {
 			h.Close()
 			return nil, errors.New("an enabled community plugin could not load")
 		}
+	}
+	if err := operationContext.Err(); err != nil {
+		h.Close()
+		return nil, err
 	}
 	return h, nil
 }
