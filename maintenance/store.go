@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/LIghtJUNction/zcalld-compat/internal/privatefile"
@@ -29,7 +30,7 @@ type transaction struct {
 }
 
 func validateDocument(d Document) error {
-	if d.Version != SchemaVersion || d.Policy.Accounts == nil || d.Ledger == nil || len(d.Policy.Accounts) > MaxAccounts || len(d.Ledger) > MaxAccounts || len(d.LegacyWarmup)+len(d.LegacyAutoReset)+len(d.LegacyResetsUsed) > 2<<20 {
+	if len(d.Adapter) > 1<<20 || (len(d.Adapter) > 0 && !json.Valid(d.Adapter)) || d.Version != SchemaVersion || d.Policy.Accounts == nil || d.Ledger == nil || len(d.Policy.Accounts) > MaxAccounts || len(d.Ledger) > MaxAccounts || len(d.LegacyWarmup)+len(d.LegacyAutoReset)+len(d.LegacyResetsUsed) > 2<<20 {
 		return ErrInvalid
 	}
 	if d.Policy.Enabled && d.Policy.EnabledAt.IsZero() {
@@ -37,6 +38,9 @@ func validateDocument(d Document) error {
 	}
 	for account, p := range d.Policy.Accounts {
 		if !accountPattern.MatchString(account) || p.ResetLeadMinutes < 3 || p.ResetLeadMinutes > 1440 {
+			return ErrInvalid
+		}
+		if strings.HasPrefix(account, "builtin:claude#") && (p.WeeklyReset || p.ExpiringReset) {
 			return ErrInvalid
 		}
 		if p.FiveHourWarmup && !p.WeeklyWarmup {

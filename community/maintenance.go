@@ -5,11 +5,43 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/LIghtJUNction/zcalld-compat/desktop"
 	"github.com/LIghtJUNction/zcalld-compat/maintenance"
 )
+
+// MaintenanceManual is an explicit action. It does not enable scheduled work;
+// every account still passes the normal verified host and NoCredits guards.
+func MaintenanceManual(ctx context.Context, root, key string, all bool) (maintenance.Report, error) {
+	registry, err := Read(root)
+	if err != nil {
+		return maintenance.Report{}, err
+	}
+	keys := []string{}
+	if all {
+		for k, meta := range registry.Accounts {
+			if meta.Enabled && accountProvider(k) == "builtin:codex" && validAccount(k, "builtin:codex") {
+				keys = append(keys, k)
+			}
+		}
+		sort.Strings(keys)
+	} else {
+		if !validAccount(key, "builtin:codex") || !registry.Accounts[key].Enabled {
+			return maintenance.Report{}, errors.New("maintenance account is unavailable")
+		}
+		keys = []string{key}
+	}
+	if len(keys) == 0 {
+		return maintenance.Report{Status: "complete", Results: []maintenance.AccountResult{}}, nil
+	}
+	engine := maintenance.Engine{Store: maintenance.Store{Directory: filepath.Join(root, "maintenance")}, ManualHost: func(string) (maintenance.Host, func()) {
+		local, close := maintenanceEngine(root, "")
+		return local.Host, close
+	}}
+	return engine.WarmAccounts(ctx, keys, all)
+}
 
 // MaintenanceRun starts no Bun process for disabled/not-due state. The single
 // total deadline includes the existing credential checkpoint/drain allowance.

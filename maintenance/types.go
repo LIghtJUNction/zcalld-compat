@@ -4,6 +4,7 @@ package maintenance
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"regexp"
@@ -22,7 +23,7 @@ var (
 	ErrInvalid     = errors.New("maintenance state is invalid")
 	ErrUnsafe      = errors.New("maintenance path is not private and regular")
 	ErrConfigured  = errors.New("maintenance already has a different imported policy")
-	accountPattern = regexp.MustCompile(`^builtin:codex#[a-f0-9]{20}$`)
+	accountPattern = regexp.MustCompile(`^builtin:(codex|claude)#[a-f0-9]{20}$`)
 )
 
 type AccountPolicy struct {
@@ -104,7 +105,9 @@ type AccountLedger struct {
 // Document is one atomic private transaction: policy and execution ledger cannot
 // be committed in different generations. LegacyWarmup retains exact input bytes.
 type Document struct {
-	Version          int                       `json:"version"`
+	Version int `json:"version"`
+	// Adapter contains non-secret, explicitly reviewed native bindings.
+	Adapter          json.RawMessage           `json:"adapter,omitempty"`
 	Policy           Policy                    `json:"policy"`
 	Ledger           map[string]*AccountLedger `json:"ledger"`
 	ImportDigest     string                    `json:"import_digest,omitempty"`

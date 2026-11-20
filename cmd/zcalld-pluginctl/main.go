@@ -93,9 +93,12 @@ func run(args []string) error {
 	switch positional[0] {
 	case "maintenance":
 		if len(positional) == 2 && positional[1] == "worker" {
+			if provider != "" || file != "" || account != "" {
+				return errors.New("maintenance worker takes only --root")
+			}
 			return runMaintenanceWorker(root, source, expectedPlan, desktopInbox)
 		}
-		result, err = runMaintenance(root, source, expectedPlan, desktopInbox, positional[1:])
+		result, err = runMaintenance(root, source, expectedPlan, desktopInbox, provider, file, account, positional[1:])
 	case "quota":
 		if len(positional) != 2 {
 			return errors.New("quota expects list or refresh --account ID")

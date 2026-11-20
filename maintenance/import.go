@@ -21,6 +21,7 @@ type AccountLink struct {
 }
 
 type ImportPlan struct {
+	Adapter              json.RawMessage                  `json:"adapter,omitempty"`
 	Accounts             map[string]AccountPolicy         `json:"accounts"`
 	Windows              map[string]map[string]WarmWindow `json:"windows"`
 	LegacyWarmup         []byte                           `json:"legacy_warmup"`
@@ -42,6 +43,9 @@ type legacySettings struct {
 	AutoResetOnly map[string]string `json:"codexAutoResetOnly"`
 	ResetLead     int               `json:"codexResetLead"`
 }
+
+// SealPlan binds adapter-specific immutable planning inputs using the same plan hash.
+func SealPlan(p *ImportPlan) { p.Hash = planHash(*p) }
 
 func planHash(p ImportPlan) string {
 	p.Hash = ""
@@ -225,6 +229,7 @@ func (s Store) ApplyPlan(ctx context.Context, p ImportPlan, expect string, enabl
 					}
 				}
 			}
+			tx.doc.Adapter = append(json.RawMessage(nil), p.Adapter...)
 			tx.doc.Policy.Accounts = p.Accounts
 			tx.doc.Policy.Enabled = enable
 			if enable {
@@ -243,6 +248,7 @@ func (s Store) ApplyPlan(ctx context.Context, p ImportPlan, expect string, enabl
 		return nil
 	}
 	tx.doc = emptyDocument()
+	tx.doc.Adapter = append(json.RawMessage(nil), p.Adapter...)
 	tx.doc.Policy.Accounts = p.Accounts
 	tx.doc.Policy.Enabled = enable
 	if enable {

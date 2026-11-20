@@ -15,7 +15,9 @@ var redeemPattern = regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[8
 type Engine struct {
 	Store Store
 	Host  Host
-	Now   func() time.Time
+	// ManualHost creates a separate owned host per concurrent explicit warmup.
+	ManualHost func(string) (Host, func())
+	Now        func() time.Time
 	// Observe receives only the fresh inspection already needed by maintenance.
 	// Notification publishing is optional and cannot fail a maintenance action.
 	Observe func(Snapshot) error
