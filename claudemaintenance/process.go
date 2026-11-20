@@ -115,6 +115,8 @@ type resultOutput struct {
 	once, readyOnce sync.Once
 }
 
+var errProcessDrain = errors.New("Claude process exit could not be confirmed")
+
 func (w *resultOutput) Write(p []byte) (int, error) {
 	n, err := w.limitedOutput.Write(p)
 	if err != nil {
@@ -151,7 +153,7 @@ func runProcess(ctx context.Context, binary string, args, env []string, work str
 	if !ok {
 		return nil, false, errors.New("Claude operation requires a deadline")
 	}
-	operation := deadline.Add(-3 * time.Second)
+	operation := deadline.Add(-4 * time.Second)
 	if !time.Now().Before(operation) {
 		return nil, false, context.DeadlineExceeded
 	}
@@ -169,7 +171,9 @@ func runProcess(ctx context.Context, binary string, args, env []string, work str
 	stderr := &limitedOutput{limit: 32 << 10}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	cmd.WaitDelay = time.Second
+	// Leave the original deadline intact. A real interactive helper needs up
+	// to 3s to close its PTY, then 500ms to confirm the killed child exited.
+	cmd.WaitDelay = 3500 * time.Millisecond
 	var writeInput func()
 	closeInput := func() {}
 	if interactive {
@@ -204,8 +208,21 @@ func runProcess(ctx context.Context, binary string, args, env []string, work str
 	if prepErr != nil {
 		return nil, false, prepErr
 	}
-	defer cleanup()
-	cmd.Cancel = func() error { closeInput(); return stop() }
+	defer func() {
+		if finishErr := cleanup(deadline); finishErr != nil {
+			out = nil
+			err = finishErr
+		}
+	}()
+	cmd.Cancel = func() error {
+		closeInput()
+		// ConPTY has no Unix TERM signal. EOF lets the helper finish its own
+		// bounded drain; WaitDelay and the owned job are the final fallback.
+		if interactive && runtime.GOOS == "windows" {
+			return nil
+		}
+		return stop()
+	}
 	if err = cmd.Start(); err != nil {
 		return nil, false, errors.New("Claude process could not start")
 	}

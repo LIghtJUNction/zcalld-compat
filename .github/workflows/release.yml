@@ -17,11 +17,20 @@ env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        target: [linux-x86_64, linux-aarch64, windows-x86_64, macos-aarch64, macos-x86_64]
+        include:
+          - { target: linux-x86_64, runner: ubuntu-24.04 }
+          - { target: linux-aarch64, runner: ubuntu-24.04-arm }
+          - { target: windows-x86_64, runner: windows-2025 }
+          - { target: macos-aarch64, runner: macos-15 }
+          - { target: macos-x86_64, runner: macos-15-intel }
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -45,7 +54,11 @@ jobs:
       - name: Build portable workers and assets
         env:
           TARGET: ${{ matrix.target }}
-        run: python3 scripts/release.py build --target "$TARGET"
+        run: python scripts/release.py build --target "$TARGET"
+      - name: Execute native Claude helpers with synthetic accounts
+        env:
+          TARGET: ${{ matrix.target }}
+        run: python scripts/test-native-claude.py --target "$TARGET"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: package-${{ matrix.target }}

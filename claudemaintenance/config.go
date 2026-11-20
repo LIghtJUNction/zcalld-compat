@@ -56,16 +56,17 @@ func (i identity) digest() string {
 func digest(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 
 type account struct {
-	ConfigDir   string  `json:"config_dir"`
-	Profile     string  `json:"profile"`
-	Ownership   string  `json:"ownership"`
-	Identity    string  `json:"identity"`
-	Automatic   bool    `json:"automatic"`
-	Enabled     bool    `json:"enabled"`
-	NoExtra     bool    `json:"no_extra"`
-	ExtraShare  int     `json:"extra_share,omitempty"`
-	ExtraAmount float64 `json:"extra_amount,omitempty"`
-	Proxy       string  `json:"proxy,omitempty"`
+	ConfigDir     string  `json:"config_dir"`
+	Profile       string  `json:"profile"`
+	Ownership     string  `json:"ownership"`
+	Identity      string  `json:"identity"`
+	Automatic     bool    `json:"automatic"`
+	NativeBinding bool    `json:"native_binding,omitempty"`
+	Enabled       bool    `json:"enabled"`
+	NoExtra       bool    `json:"no_extra"`
+	ExtraShare    int     `json:"extra_share,omitempty"`
+	ExtraAmount   float64 `json:"extra_amount,omitempty"`
+	Proxy         string  `json:"proxy,omitempty"`
 }
 type config struct {
 	Version        int                `json:"version"`
@@ -148,7 +149,14 @@ func profileIdentity(path string) (identity, error) {
 }
 
 func validateAccount(a account) error {
-	if !a.Enabled || (a.Ownership != "current" && a.Ownership != "saved") || !noLinks(a.ConfigDir) || !privatefile.CheckDirectory(a.ConfigDir) {
+	if !a.Enabled || (a.Ownership != "current" && a.Ownership != "saved") || !noLinks(a.ConfigDir) {
+		return ErrConfiguration
+	}
+	if a.Ownership == "current" {
+		if !currentDirectory(a.ConfigDir) {
+			return ErrConfiguration
+		}
+	} else if !privatefile.CheckDirectory(a.ConfigDir) {
 		return ErrConfiguration
 	}
 	i, err := profileIdentity(a.Profile)

@@ -1,0 +1,459 @@
+{
+  "schema_version": 1,
+  "source_repository": "https://github.com/yetone/magpie",
+  "source_revision": "1e174f8f9f613a920203a4658d259456fcab5d0d",
+  "license": "MIT",
+  "status": "adapted_distribution_source_manifest",
+  "bounds": {
+    "wsl": false,
+    "conpty": "system",
+    "credential_import": false,
+    "print_fallback": false,
+    "third_party_added": [
+      "golang.org/x/text v0.39.0"
+    ],
+    "existing_dependency": [
+      "golang.org/x/sys v0.49.0"
+    ],
+    "shutdown_grace_ms": 3000,
+    "shutdown_reap_ms": 500,
+    "unix_shutdown_scope": "owned_pty_process_group; no claim for escaped sessions",
+    "windows_shutdown_scope": "direct_process; enclosing adapter additionally drains owned Job"
+  },
+  "files": [
+    {
+      "path": "internal/claudetui/child_unix.go",
+      "source_path": "internal/claudetui/child_unix.go",
+      "source_blob": "16f2ff14aff870cf90379a5e76ec4f0f4eb38478",
+      "changes": [
+        "rewrite internal import paths",
+        "confirm bounded owned child termination after graceful/forced stop; share finalizer across EOF/signal/deadline"
+      ],
+      "bytes": 2540,
+      "sha256": "dce16733ee08e17b19d550e90e6c4f440fda102b92cd403e16ba5b738baa9b2d",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/child_unix.go"
+    },
+    {
+      "path": "internal/claudetui/child_windows.go",
+      "source_path": "internal/claudetui/child_windows.go",
+      "source_blob": "2287e3383cd09e04c069b488b9db93acd199b527",
+      "changes": [
+        "rewrite internal import paths",
+        "system ConPTY only; omit Magpie cache and replacement runtime lookup; retain native child implementation",
+        "confirm bounded owned child termination after graceful/forced stop; share finalizer across EOF/signal/deadline"
+      ],
+      "bytes": 7504,
+      "sha256": "94e491a9e46d4f205db1cc8ad250b4645e8d4f6a5d40e337f4d27bd8ddc52aaf",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/child_windows.go"
+    },
+    {
+      "path": "internal/claudetui/command.go",
+      "source_path": "internal/claudetui/command.go",
+      "source_blob": "6175fcfda6c5033fc20d3b5f24cf20f7f3a9269d",
+      "changes": [
+        "add explicit standalone transcript-directory environment key"
+      ],
+      "bytes": 3798,
+      "sha256": "68ddba680d5896fe7d1221bb6634702343754dc265c891a7ced078e332607c9c",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/command.go"
+    },
+    {
+      "path": "internal/claudetui/pty_darwin.go",
+      "source_path": "internal/claudetui/pty_darwin.go",
+      "source_blob": "597bf4266a7206f35acb7dfb4df0727771af4609",
+      "changes": [],
+      "bytes": 1606,
+      "sha256": "167ef6b11108da509d379f575f4762d2b57d6a35eaa6a2435157b991371face0",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/pty_darwin.go"
+    },
+    {
+      "path": "internal/claudetui/pty_linux.go",
+      "source_path": "internal/claudetui/pty_linux.go",
+      "source_blob": "7a4f6846ab15768963bc9b078dcedfe188402ad2",
+      "changes": [],
+      "bytes": 782,
+      "sha256": "dcf10c505cd794c0469f5db65e2f83546a0b068f3eb0a37f64735224cc339c42",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/pty_linux.go"
+    },
+    {
+      "path": "internal/claudetui/screen.go",
+      "source_path": "internal/claudetui/screen.go",
+      "source_blob": "144d6e0b61b315d404afe12a98795984ba8c6f0b",
+      "changes": [],
+      "bytes": 5404,
+      "sha256": "bb833fbc078c16055b774d2f23521973b6055d94c31acef2d21810ff792dddf2",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/screen.go"
+    },
+    {
+      "path": "internal/claudetui/tap.go",
+      "source_path": "internal/claudetui/tap.go",
+      "source_blob": "34af8e0c10cc6f995a4a1567e437c1d448e7410e",
+      "changes": [],
+      "bytes": 10609,
+      "sha256": "38fa7de660547c6b3fb4727abc348d1d453c98cca2baa2e4a94a6232b80daef1",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/tap.go"
+    },
+    {
+      "path": "internal/claudetui/tap.js",
+      "source_path": "internal/claudetui/tap.js",
+      "source_blob": "0453ffb69cb2f40d9ea39518b4f053142ff3839a",
+      "changes": [],
+      "bytes": 8003,
+      "sha256": "a65f3246afc7a402b579cbe6514cbcd435c088546dd48818870c36aec052c385",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/tap.js"
+    },
+    {
+      "path": "internal/claudetui/tap_other.go",
+      "source_path": "internal/claudetui/tap_other.go",
+      "source_blob": "8affc775d434a0e1e69a80f13252eee9bbd1e4dc",
+      "changes": [],
+      "bytes": 143,
+      "sha256": "48a9e91f36614b234381d27fcb19630e0b65b0525f3f4a10c4c785e8f1792c9f",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/tap_other.go"
+    },
+    {
+      "path": "internal/claudetui/tap_windows.go",
+      "source_path": "internal/claudetui/tap_windows.go",
+      "source_blob": "ec9798b77ef639b2b0f1b76b9afa713caf0ed951",
+      "changes": [],
+      "bytes": 511,
+      "sha256": "755c89ce603477cb6dc4efd3cae2704fa3b7057a36252169ebc2c97084464093",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/tap_windows.go"
+    },
+    {
+      "path": "internal/claudetui/transcript.go",
+      "source_path": "internal/claudetui/transcript.go",
+      "source_blob": "7c26c4cfd4ae3a67eb3f6bc71f142de672af2297",
+      "changes": [],
+      "bytes": 4851,
+      "sha256": "38493247d1f82acf55142fe08e6008c27b5e6934884038ad489af1c6dbc31cf7",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/transcript.go"
+    },
+    {
+      "path": "internal/claudetui/tui.go",
+      "source_path": "internal/claudetui/tui.go",
+      "source_blob": "c8c5f18ce05cdffb5a4a3b407d4995f3fe27d0ac",
+      "changes": [
+        "rewrite internal import paths",
+        "require explicit local config/session; no Magpie appdir or keyed marker; refuse WSL; strip private config from child env",
+        "confirm bounded owned child termination after graceful/forced stop; share finalizer across EOF/signal/deadline"
+      ],
+      "bytes": 60573,
+      "sha256": "74fbb5d01160672958e90c9d527138f22c8122c02642c2f05546b07e15b95ae2",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/tui.go"
+    },
+    {
+      "path": "internal/claudetui/waiting.go",
+      "source_path": "internal/claudetui/waiting.go",
+      "source_blob": "be182044c5bda510bed05dcf85a9021f1f44b56f",
+      "changes": [],
+      "bytes": 2731,
+      "sha256": "49a7408c8cf014171e48faa65de1a10c439cfc224a854219627306f530c38214",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/waiting.go"
+    },
+    {
+      "path": "internal/claudetui/waiting_unix.go",
+      "source_path": "internal/claudetui/waiting_unix.go",
+      "source_blob": "cdbeccb095163b2ff62a8f89ac2945363e43de7d",
+      "changes": [
+        "rewrite internal import paths"
+      ],
+      "bytes": 2432,
+      "sha256": "65fa0ab1678ee27ea6ee04e8d0b78373ef097cf0a14b29639889a7855d2da8b2",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/waiting_unix.go"
+    },
+    {
+      "path": "internal/claudetui/waiting_windows.go",
+      "source_path": "internal/claudetui/waiting_windows.go",
+      "source_blob": "3a2f644c32e11e53c0d78e01ffab17862047b1de",
+      "changes": [],
+      "bytes": 205,
+      "sha256": "d01df84e50aa2edcf48b03cbf25acf18fbbcdfd98b37dc9c36aaeae039f957b4",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/waiting_windows.go"
+    },
+    {
+      "path": "internal/claudetui/whole.go",
+      "source_path": "internal/claudetui/whole.go",
+      "source_blob": "fab7352e2160d34d865b7fe218be230366d55762",
+      "changes": [],
+      "bytes": 13869,
+      "sha256": "fd9ae6fcff2d69ebbb9ededf69e234ee9c3d8f65d029a2496931374d09a204be",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/whole.go"
+    },
+    {
+      "path": "internal/claudetui/wslread.go",
+      "source_path": "internal/claudetui/wslread.go",
+      "source_blob": "bf711f88eac6ab5011cfca08723862883948654f",
+      "changes": [
+        "rewrite internal import paths"
+      ],
+      "bytes": 4041,
+      "sha256": "f43b587505c9c572eabf2a975f651d36de8359e475031ef53dad2e104c510262",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/wslread.go"
+    },
+    {
+      "path": "internal/claudetui/lazyre/lazyre.go",
+      "source_path": "internal/lazyre/lazyre.go",
+      "source_blob": "f5e68c5a200f3e6608597c00886802eaf2ab6c0d",
+      "changes": [],
+      "bytes": 4742,
+      "sha256": "9e8f59bb60097901d63d011bca4a1621c53b75251f213200a2e9fe6ed3609313",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/lazyre/lazyre.go"
+    },
+    {
+      "path": "internal/claudetui/ptyproc/command.go",
+      "source_path": "internal/proc/proc.go",
+      "source_blob": "7c050250a16bddc72b1b16d14c7e4d7f3bb28149",
+      "changes": [
+        "extract Command; omit unrelated settings/WSL discovery"
+      ],
+      "bytes": 304,
+      "sha256": "7ca51bc773313a51541ae6d934e5f93db2d38c4d42f6b21c2efaa6d7362951b0",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/proc/proc.go"
+    },
+    {
+      "path": "internal/claudetui/ptyproc/proc_other.go",
+      "source_path": "internal/proc/proc_other.go",
+      "source_blob": "782f92102548ca200dabfa5e1c7c063218a7b61a",
+      "changes": [],
+      "bytes": 417,
+      "sha256": "609e9eb6f0ed044534b88df9f447dea5a275eb79fa44cd8ab891afd9fe2bc3a0",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/proc/proc_other.go"
+    },
+    {
+      "path": "internal/claudetui/ptyproc/proc_windows.go",
+      "source_path": "internal/proc/proc_windows.go",
+      "source_blob": "39638d7cbf72325a89f0bd86d58b042dd921b26f",
+      "changes": [],
+      "bytes": 945,
+      "sha256": "e6da04318fa54c5eaa098d6661441e32a02f553656a0c35e0e9cb0510acdcce8",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/proc/proc_windows.go"
+    },
+    {
+      "path": "internal/claudetui/ptyproc/batch_windows.go",
+      "source_path": "internal/proc/batch_windows.go",
+      "source_blob": "9f0f347e3dcb46c6be9034ea42c9e710c1b37ecf",
+      "changes": [],
+      "bytes": 3424,
+      "sha256": "487c97a4d84315e65b21749cd3af19cfd18438f9f9c2c40790e5b6ae49c7e7a5",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/proc/batch_windows.go"
+    },
+    {
+      "path": "internal/claudetui/wslpath/path.go",
+      "source_path": "internal/wslrun/wslrun.go",
+      "source_blob": "cd9ce9bcd0e07ba93940b1e093fc9e34f26bba5b",
+      "changes": [
+        "extract exact Tool, Linux, isLetter only"
+      ],
+      "bytes": 1058,
+      "sha256": "1e68de1e40eb8931c6b33fb8288251ef74548a242997f2d1e7b12991ce59aa63",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/wslrun/wslrun.go"
+    },
+    {
+      "path": "internal/claudetui/tui_test.go",
+      "source_path": "internal/claudetui/tui_test.go",
+      "source_blob": "ea825d991244b55d7e9dcdd2066b074f2cf0e863",
+      "changes": [
+        "fixture supplies explicit config/session; optional synthetic native process markers; no actual Claude"
+      ],
+      "bytes": 72823,
+      "sha256": "5c5e3b98fa932fac0c7507c04261cd1f26b50bc0d1779767aac13f3713ec311d",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/tui_test.go"
+    },
+    {
+      "path": "internal/claudetui/fake_unix_test.go",
+      "source_path": "internal/claudetui/fake_unix_test.go",
+      "source_blob": "a5dcede071e3f4eaa8bfcdd262e9fdfd9783de66",
+      "changes": [],
+      "bytes": 675,
+      "sha256": "a8bd71bf83433dca93d53e2eee7ea4024624b930649796229ba27c3ff63340a6",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/fake_unix_test.go"
+    },
+    {
+      "path": "internal/claudetui/fake_windows_test.go",
+      "source_path": "internal/claudetui/fake_windows_test.go",
+      "source_blob": "03769a59ea7c48f7ba21ffc2d2ffc1b3f31d5476",
+      "changes": [],
+      "bytes": 1018,
+      "sha256": "2801db8b55ab7b436e196bab9c510e2a78f489744b19ddbc6f8dc19349b8084a",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/fake_windows_test.go"
+    },
+    {
+      "path": "internal/claudetui/whole_test.go",
+      "source_path": "internal/claudetui/whole_test.go",
+      "source_blob": "d0d0c149a319668ebdc1d771f9ecedc6b986b25e",
+      "changes": [],
+      "bytes": 10468,
+      "sha256": "9731eaf60120fa16357bd4adb16d6c5a188b7831e487aec3a4b89fd888e2c23c",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/whole_test.go"
+    },
+    {
+      "path": "internal/claudetui/pty_darwin_test.go",
+      "source_path": "internal/claudetui/pty_darwin_test.go",
+      "source_blob": "e67364d640e599809873c598e8c8bd813f9cb8e0",
+      "changes": [],
+      "bytes": 1765,
+      "sha256": "6414fd522548139f644c0f9259ef87d9f9e1c39251b52cdb15b7588f24c2547c",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/pty_darwin_test.go"
+    },
+    {
+      "path": "LICENSE.magpie",
+      "source_path": "LICENSE",
+      "source_blob": "f840b8d9149480136d3a040ed1a74053bce1b20d",
+      "changes": [],
+      "bytes": 1063,
+      "sha256": "79d2c8444715d4bc453ec4f8a0aaf2051a4c1ee5ac08f5bd2e5848aef87c7572",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/LICENSE"
+    },
+    {
+      "path": "NOTICE.magpie",
+      "source_path": null,
+      "source_blob": null,
+      "changes": [
+        "new attribution and integration boundary"
+      ],
+      "bytes": 1161,
+      "sha256": "e92831bdc3991c26f14325fae6f7d13bdd4624c015e8ddc75f4ffba1e726be95"
+    },
+    {
+      "path": "internal/claudetui/testdata/.gitattributes",
+      "source_path": "internal/claudetui/testdata/.gitattributes",
+      "source_blob": "08e4e034913ae020b6e8249baba6eebb6a05ce63",
+      "changes": [],
+      "bytes": 98,
+      "sha256": "191a368f96dbeb951e87c4a51987a7ddbfe7d8814d3018643997dafc50f1d35a",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/testdata/.gitattributes"
+    },
+    {
+      "path": "internal/claudetui/testdata/paste-images-2.1.319.bin",
+      "source_path": "internal/claudetui/testdata/paste-images-2.1.319.bin",
+      "source_blob": "8c11e04b6b86020ac333d0c6c6709db4453921f2",
+      "changes": [],
+      "bytes": 10516,
+      "sha256": "aafccebadc762189e38b46c60bba4136ccf1b01b3b5585675c3e7419a4e984a6",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/testdata/paste-images-2.1.319.bin"
+    },
+    {
+      "path": "internal/claudetui/testdata/usage-2.1.316.bin",
+      "source_path": "internal/claudetui/testdata/usage-2.1.316.bin",
+      "source_blob": "5b276ea8debfb2e0794c8fc83ea9c1d948636072",
+      "changes": [],
+      "bytes": 3910,
+      "sha256": "bc171d2db2c1df0f6d0a1e60d342f319d63541311f73543c80d8e8938d501616",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/testdata/usage-2.1.316.bin"
+    },
+    {
+      "path": "internal/claudetui/testdata/usage-failed-win-2.1.316.bin",
+      "source_path": "internal/claudetui/testdata/usage-failed-win-2.1.316.bin",
+      "source_blob": "a658a7f28a484469b5e42761c21eb3c0b313e846",
+      "changes": [],
+      "bytes": 1457,
+      "sha256": "bb70ebb62d8c9aa748beafc6c9e64ad9d3413b82f5c22cc936a95fb0abd9facd",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/testdata/usage-failed-win-2.1.316.bin"
+    },
+    {
+      "path": "internal/claudetui/testdata/usage-last-known-2.1.316.bin",
+      "source_path": "internal/claudetui/testdata/usage-last-known-2.1.316.bin",
+      "source_blob": "94fde87c1d5180c4c2ae6656c9673ec84aeca577",
+      "changes": [],
+      "bytes": 2332,
+      "sha256": "259af05c902af2c86eac8abd113cf2a8d2a605b8cb7c2c46b7843b62025a8436",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/testdata/usage-last-known-2.1.316.bin"
+    },
+    {
+      "path": "internal/claudetui/testdata/usage-loading-win-2.1.316.bin",
+      "source_path": "internal/claudetui/testdata/usage-loading-win-2.1.316.bin",
+      "source_blob": "e8d857cdb18d9dc8ad4beb33c7b853504b3390da",
+      "changes": [],
+      "bytes": 1338,
+      "sha256": "51df014f89a71e867141a06165a027eef781e5e68bef3cf970a89621e16be49a",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/testdata/usage-loading-win-2.1.316.bin"
+    },
+    {
+      "path": "internal/claudetui/testdata/usage-refreshing-2.1.316.bin",
+      "source_path": "internal/claudetui/testdata/usage-refreshing-2.1.316.bin",
+      "source_blob": "81ba0bda8288dbfc756e906a583cddb77146d7cc",
+      "changes": [],
+      "bytes": 2082,
+      "sha256": "d33f3285837b6e26c150fc77687b517f9b950489981575571feeff5338f3418c",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/claudetui/testdata/usage-refreshing-2.1.316.bin"
+    },
+    {
+      "path": "cmd/zcalld-claude-tui/main.go",
+      "source_path": null,
+      "source_blob": null,
+      "changes": [
+        "new standalone contract or synthetic native acceptance"
+      ],
+      "bytes": 6465,
+      "sha256": "f4c6b8164df1673deecc04b4bb28346dc98ff37dfccec842717f737d146c96f7"
+    },
+    {
+      "path": "cmd/zcalld-claude-tui/main_test.go",
+      "source_path": null,
+      "source_blob": null,
+      "changes": [
+        "new standalone contract or synthetic native acceptance"
+      ],
+      "bytes": 2469,
+      "sha256": "956c3862d491334d847642fbaa0049d1777225a2fe1ddd88f946feb6515b90e0"
+    },
+    {
+      "path": "internal/claudetui/native_probe_test.go",
+      "source_path": null,
+      "source_blob": null,
+      "changes": [
+        "new standalone contract or synthetic native acceptance",
+        "synthetic forced-stop and original-deadline drain regression"
+      ],
+      "bytes": 1366,
+      "sha256": "2f9b6726469764ff30d9461b450c00cbdfc6865a35ba54259d428655c5392641"
+    },
+    {
+      "path": "scripts/test-claude-tui.py",
+      "source_path": null,
+      "source_blob": null,
+      "changes": [
+        "new standalone contract or synthetic native acceptance",
+        "synthetic forced-stop and original-deadline drain regression"
+      ],
+      "bytes": 13843,
+      "sha256": "21c1e3a8169496ca742262d233403a7a35514ee525cf6d7c7a5fabcc19a8ae4a"
+    },
+    {
+      "path": "internal/claudetui/stop.go",
+      "changes": [
+        "confirm bounded owned child termination after graceful/forced stop; share finalizer across EOF/signal/deadline"
+      ],
+      "bytes": 1249,
+      "sha256": "56d602100859042b7af3f04b8e1248f015786242768896b737c194d10246bbce"
+    },
+    {
+      "path": "internal/claudetui/native_stop_unix_test.go",
+      "changes": [
+        "synthetic forced-stop and original-deadline drain regression"
+      ],
+      "bytes": 234,
+      "sha256": "9d251a7780884c9d992f129f26e0d9e4d4b162d3701e9e94593336f238615af9"
+    },
+    {
+      "path": "internal/claudetui/native_stop_windows_test.go",
+      "changes": [
+        "synthetic forced-stop and original-deadline drain regression"
+      ],
+      "bytes": 419,
+      "sha256": "83bd0a44bd80edd3ab1f873233b919de07b6f1b1bc8646197548adb7af9cffb8"
+    },
+    {
+      "path": "claudemaintenance/reset_time.go",
+      "source_path": "internal/provider/claude_usage_cli.go",
+      "source_blob": "ca50e5adf8229d1ee34853af77533c13b237fb73",
+      "source_url": "https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/provider/claude_usage_cli.go",
+      "changes": [
+        "extract the pure reset-time parser; adapt package and imports without the original account/CLI state"
+      ],
+      "bytes": 4244,
+      "sha256": "174982b0ec492cc7bfb45d71c36401667a22c67ea65f05010aff9b5678630a09"
+    }
+  ]
+}

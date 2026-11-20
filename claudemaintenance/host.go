@@ -276,7 +276,9 @@ func (h Host) warmup(ctx context.Context, key string, windows []string) (mainten
 			return no, errors.New("Claude warmup requires a deadline")
 		}
 		binary = c.Helper
-		args = []string{"--claude-binary", c.Binary, "--config-dir", a.ConfigDir, "--profile", a.Profile, "--work-dir", work, "--deadline-ms", strconv.FormatInt(deadline.Add(-4*time.Second).UnixMilli(), 10)}
+		// Its 3.5s PTY drain must finish before the outer process's -4s
+		// cancellation boundary. This reserves time from the same budget.
+		args = []string{"--claude-binary", c.Binary, "--config-dir", a.ConfigDir, "--profile", a.Profile, "--work-dir", work, "--deadline-ms", strconv.FormatInt(deadline.Add(-8*time.Second).UnixMilli(), 10)}
 		if c.TrustWorkspace {
 			args = append(args, "--trust-workspace")
 		}
@@ -313,7 +315,7 @@ func Manual(ctx context.Context, root, key string, all bool) (maintenance.Report
 	keys := []string{}
 	if all {
 		for k, a := range c.Accounts {
-			if a.Enabled && a.Automatic {
+			if a.Enabled && (a.Automatic || a.NativeBinding) {
 				keys = append(keys, k)
 			}
 		}

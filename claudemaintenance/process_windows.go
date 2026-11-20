@@ -6,13 +6,15 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-func prepareProcess(cmd *exec.Cmd) (func(context.Context) error, func() error, func(), error) {
+func prepareProcess(cmd *exec.Cmd) (func(context.Context) error, func() error, func(time.Time) error, error) {
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
 		return nil, nil, nil, err
@@ -27,7 +29,30 @@ func prepareProcess(cmd *exec.Cmd) (func(context.Context) error, func() error, f
 	// the process belongs to our kill-on-close job. Failure is not a fallback.
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_SUSPENDED | windows.CREATE_NO_WINDOW}
 	stop := func() error { return windows.TerminateJobObject(job, 1) }
-	cleanup := func() { _ = windows.TerminateJobObject(job, 1); _ = windows.CloseHandle(job) }
+	cleanup := func(deadline time.Time) error {
+		defer windows.CloseHandle(job)
+		if err := windows.TerminateJobObject(job, 1); err != nil {
+			return errProcessDrain
+		}
+		// TerminateJobObject starts termination; it does not wait for owned
+		// descendants. Parent Wait alone is also insufficient.
+		for {
+			var accounting struct {
+				UserTime, KernelTime, PeriodUserTime, PeriodKernelTime           int64
+				PageFaults, TotalProcesses, ActiveProcesses, TerminatedProcesses uint32
+			}
+			if err := windows.QueryInformationJobObject(job, windows.JobObjectBasicAccountingInformation, uintptr(unsafe.Pointer(&accounting)), uint32(unsafe.Sizeof(accounting)), nil); err != nil {
+				return errProcessDrain
+			}
+			if accounting.ActiveProcesses == 0 {
+				return nil
+			}
+			if !time.Now().Before(deadline) {
+				return errProcessDrain
+			}
+			time.Sleep(min(10*time.Millisecond, time.Until(deadline)))
+		}
+	}
 	start := func(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -70,5 +95,8 @@ func prepareProcess(cmd *exec.Cmd) (func(context.Context) error, func() error, f
 		_, err = windows.ResumeThread(handle)
 		return err
 	}
-	return start, stop, cleanup, nil
+	var once sync.Once
+	var finishErr error
+	finish := func(deadline time.Time) error { once.Do(func() { finishErr = cleanup(deadline) }); return finishErr }
+	return start, stop, finish, nil
 }

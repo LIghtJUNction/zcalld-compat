@@ -337,3 +337,19 @@ a window after the check. See the [core contract and usage guide](https://github
 for the exact scope. These changes require the updated native host as declared
 by the package dependency; installing a helper alone does not rewrite an older
 materialized builtin bundle.
+
+### Optional Claude Code maintenance
+
+The [Claude maintenance guide](docs/CLAUDE-MAINTENANCE.md) covers explicit
+current or saved native-profile bindings, off/week/all schedules, multiple local
+clock times, imported warmup history, and manual single/all-account warmup.
+The native Claude CLI owns its credentials; zcalld does not copy its OAuth tokens
+or call Anthropic's OAuth endpoints itself. The bundled `zcalld-claude-tui` runs
+a real PTY/ConPTY session and does not silently fall back to print mode.
+
+Installation and plan/apply leave scheduling disabled. A warmup can consume
+subscription allowance; the no-extra setting and configured extra-usage caps
+are checked before sending. Native CLI startup can itself have effects, so an
+uncertain outcome stays pending for review and is never blindly replayed.
+Claude reset-card operations are unsupported. Maintenance is separate from the
+gateway provider adapter and does not register a provider route by itself.

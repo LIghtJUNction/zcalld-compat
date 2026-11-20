@@ -32,10 +32,13 @@ type usageRow struct {
 	} `json:"scope"`
 }
 type limits struct {
-	Rows  json.RawMessage `json:"limits"`
-	Five  json.RawMessage `json:"five_hour"`
-	Week  json.RawMessage `json:"seven_day"`
-	Extra *struct {
+	Rows   json.RawMessage `json:"limits"`
+	Five   json.RawMessage `json:"five_hour"`
+	Week   json.RawMessage `json:"seven_day"`
+	Opus   json.RawMessage `json:"seven_day_opus"`
+	Sonnet json.RawMessage `json:"seven_day_sonnet"`
+	Fable  json.RawMessage `json:"seven_day_overage_included"`
+	Extra  *struct {
 		Enabled bool     `json:"is_enabled"`
 		Used    *float64 `json:"used_credits"`
 		Limit   *float64 `json:"monthly_limit"`
@@ -119,7 +122,7 @@ func parseUsage(b []byte, now time.Time) (usage, error) {
 					w.SpanSeconds = 7 * 86400
 				case "weekly_scoped":
 					if row.Scope == nil || row.Scope.Model == nil || strings.TrimSpace(row.Scope.Model.Name) == "" {
-						continue
+						return out, ErrConfiguration
 					}
 					w.Name = "7 days · " + row.Scope.Model.Name
 					w.Model = row.Scope.Model.Name
@@ -136,17 +139,21 @@ func parseUsage(b []byte, now time.Time) (usage, error) {
 				}
 				out.Windows = append(out.Windows, w)
 			}
-		} else if l.Five != nil || l.Week != nil {
-			for i, raw := range []json.RawMessage{l.Five, l.Week} {
+		} else if l.Five != nil || l.Week != nil || l.Opus != nil || l.Sonnet != nil || l.Fable != nil {
+			for i, raw := range []json.RawMessage{l.Five, l.Week, l.Opus, l.Sonnet, l.Fable} {
 				// null is not a successful unused-window reading. Claude's
 				// text may prove one; otherwise this meter remains unknown.
 				if raw == nil || string(raw) == "null" {
 					continue
 				}
 				w := maintenance.Window{Name: "5 hours", SpanSeconds: 5 * 3600}
-				if i == 1 {
+				if i > 0 {
 					w.Name = "7 days"
 					w.SpanSeconds = 7 * 86400
+				}
+				if i > 1 {
+					w.Model = []string{"Opus", "Sonnet", "Fable"}[i-2]
+					w.Name += " · " + w.Model
 				}
 				if string(raw) != "null" {
 					var v struct {
@@ -173,7 +180,9 @@ func parseUsage(b []byte, now time.Time) (usage, error) {
 	if !haveResult {
 		return out, errors.New("Claude usage did not complete")
 	}
-	if !out.Known {
+	// A partial structured report does not erase an explicit scoped text
+	// reading. Merge only absent names; structured readings remain authoritative.
+	{
 		text = strings.TrimSpace(ansi.ReplaceAllString(text, ""))
 		for _, line := range strings.Split(text, "\n") {
 			m := usageLine.FindStringSubmatch(strings.TrimSpace(line))
@@ -200,9 +209,18 @@ func parseUsage(b []byte, now time.Time) (usage, error) {
 				}
 				w.ResetsAt = &t
 			}
-			out.Windows = append(out.Windows, w)
+			present := false
+			for _, known := range out.Windows {
+				if strings.EqualFold(known.Name, w.Name) {
+					present = true
+					break
+				}
+			}
+			if !present {
+				out.Windows = append(out.Windows, w)
+			}
 		}
-		out.Known = len(out.Windows) > 0
+		out.Known = out.Known || len(out.Windows) > 0
 	}
 	seen := map[string]bool{}
 	for _, w := range out.Windows {
@@ -217,7 +235,26 @@ func parseUsage(b []byte, now time.Time) (usage, error) {
 	return out, nil
 }
 
-func (u usage) held(a account, now time.Time) (bool, error) {
+func (u usage) held(a account, now time.Time) (bool, error) { return u.heldForModel(a, "haiku", now) }
+
+// Model families come only from the selected explicit model and the observed
+// quota scope. Unknown scoped limits are never silently treated as unlimited.
+func claudeModelFamily(model string) string {
+	parts := strings.FieldsFunc(strings.ToLower(strings.TrimSpace(model)), func(r rune) bool { return r < 'a' || r > 'z' })
+	family := ""
+	for _, part := range parts {
+		switch part {
+		case "haiku", "sonnet", "opus", "fable":
+			if family != "" && family != part {
+				return ""
+			}
+			family = part
+		}
+	}
+	return family
+}
+
+func (u usage) heldForModel(a account, model string, now time.Time) (bool, error) {
 	restrict := a.NoExtra
 	if a.ExtraShare > 0 || a.ExtraAmount > 0 {
 		if !u.ExtraKnown {
@@ -231,15 +268,22 @@ func (u usage) held(a account, now time.Time) (bool, error) {
 		return false, nil
 	}
 	for _, w := range u.Windows {
-		if w.Aside || w.Model != "" {
+		if w.Aside || w.Used < 100 {
 			continue
 		}
 		if w.ResetsAt != nil && !w.ResetsAt.After(now) {
 			continue
 		}
-		if w.Used >= 100 {
-			return true, nil
+		if w.Model != "" {
+			scope, family := claudeModelFamily(w.Model), claudeModelFamily(model)
+			if scope == "" || family == "" {
+				return false, errors.New("Claude scoped usage applicability is unknown")
+			}
+			if scope != family {
+				continue
+			}
 		}
+		return true, nil
 	}
 	return false, nil
 }

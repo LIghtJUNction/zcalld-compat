@@ -19,6 +19,28 @@ import (
 const syntheticUser = "synthetic@example.invalid"
 
 func TestMain(m *testing.M) {
+	if len(os.Args) > 2 && (os.Args[1] == "--owned-parent" || os.Args[1] == "--owned-child") {
+		fakeOwnedProcess()
+		return
+	}
+	// Only this compiled test executable exposes fixture ACL setup. The shipped
+	// helper has no such command and never runs these synthetic account paths.
+	if len(os.Args) > 2 && os.Args[1] == "--protect-fixture" {
+		for _, path := range os.Args[2:] {
+			i, e := os.Lstat(path)
+			if e != nil || i.Mode()&os.ModeSymlink != 0 {
+				os.Exit(91)
+			}
+			mode := os.FileMode(0600)
+			if i.IsDir() {
+				mode = 0700
+			}
+			if privatefile.Protect(path, mode) != nil {
+				os.Exit(92)
+			}
+		}
+		return
+	}
 	if len(os.Args) > 1 && (os.Args[1] == "-p" || os.Args[1] == "--capabilities" || os.Args[1] == "--claude-binary") {
 		fakeCLI()
 		return
@@ -243,6 +265,24 @@ func TestPlanPreservesModesClocksHistoryAndDoesNotImportCredentials(t *testing.T
 	}
 }
 func bytesContain(b []byte, s string) bool { return strings.Contains(string(b), s) }
+
+func TestSourceLapsedClaudeIdentityIsNotAdopted(t *testing.T) {
+	f := newFixture(t, map[string]any{"claudeWarmup": "off"}, true)
+	protectWrite(t, filepath.Join(f.source, "logins.json"), []map[string]any{{
+		"id": "login-id", "agent": "claude", "user": syntheticUser,
+		"profile": identity{Email: syntheticUser, Organization: "fake-org", Account: "fake-member"},
+		"lapsed":  "source marked this identity expired",
+	}})
+	if _, err := Plan(t.Context(), f.root, f.source, f.bindings, "", false); err == nil {
+		t.Fatal("expired source identity accepted")
+	}
+	if _, err := os.Stat(filepath.Join(Store(f.root).Directory, "state.json")); !os.IsNotExist(err) {
+		t.Fatal("rejected identity created policy")
+	}
+	if len(generations(t, f)) != 0 {
+		t.Fatal("expired identity started the CLI")
+	}
+}
 
 func TestExplicitEmptyClockAndOffStillPreservesPendingLedger(t *testing.T) {
 	f := newFixture(t, map[string]any{"claudeWarmup": "off", "claudeWarmAt": "06:00", "claudeWarmAts": []string{}}, false)

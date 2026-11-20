@@ -1,0 +1,18 @@
+This repository contains an adapted subset of Magpie's interactive Claude helper.
+Upstream: https://github.com/yetone/magpie
+Revision: 1e174f8f9f613a920203a4658d259456fcab5d0d
+License: MIT; the complete upstream license is in LICENSE.magpie.
+
+The PTY/ConPTY, screen parser, transcript translator and tap script are from
+that fixed revision. docs/CLAUDE-TUI-SOURCE.json records copied files and adaptations.
+The standalone wrapper requires explicit binary/config/profile/workspace and
+a finite deadline. It never silently falls back to print mode. It neither
+copies credentials nor selects an account, discovers WSL, loads Magpie settings,
+or downloads a console runtime. Windows uses the system ConPTY; upstream
+Windows 10 long-paste errors remain errors. The copied private guard facility
+is not enabled by this wrapper. Only an explicit trust-workspace flag permits
+its owned workspace trust prompt; bypass onboarding is not enabled.
+
+The helper uses golang.org/x/text v0.39.0 for terminal text widths. Its BSD
+license is included in LICENSES/golang.org__x__text@v0.39.0.txt. Existing Go
+dependencies remain declared by the complete repository go.mod/go.sum.

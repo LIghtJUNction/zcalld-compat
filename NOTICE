@@ -3,3 +3,5 @@ Portions of this repository are derived from Magpie, copyright its contributors,
 New zcalld adapters are copyright 2026 LIghtJUNction contributors, under MIT. Distributed helper binaries also include the Go runtime and the modules recorded in go.mod/go.sum; LICENSES contains their license notices.
 
 privacy/audit.go adapts the metadata schema, per-placeholder aggregation, daily checked counters and whole-day retention policy from upstream internal/maskrec/maskrec.go and checked.go at the pinned revision. zcalld adds bounded metadata, cross-process locking, explicit flush acknowledgement, graceful-EOF flush and platform-private files. Detection records do not claim a final provider or generation outcome.
+
+The optional Claude Code PTY/ConPTY helper and pure reset-time parser derive from Magpie revision 1e174f8f9f613a920203a4658d259456fcab5d0d. NOTICE.magpie, LICENSE.magpie and docs/CLAUDE-TUI-SOURCE.json describe the extracted source and adaptations. The new maintenance adapter uses explicit native-profile bindings and does not import Magpie's GUI or global configuration subsystem.

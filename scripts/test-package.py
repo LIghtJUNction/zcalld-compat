@@ -16,6 +16,8 @@ spec.loader.exec_module(release)
 
 DOCS = (
     "docs/CODEX-MAINTENANCE.md",
+    "docs/CLAUDE-MAINTENANCE.md",
+    "docs/CLAUDE-TUI-SOURCE.json",
     "packaging/launchd/org.zcalld.maintenance.plist.in",
     "packaging/windows/zcalld-maintenance.xml.in",
 )
@@ -67,10 +69,10 @@ class MaintenancePackageTests(unittest.TestCase):
                         self.assertEqual(set(archive.getnames()), expected)
                         contents = {name: archive.extractfile(name).read() for name in expected}
                 doc = lead + "share/doc/zcalld-compat/"
-                launchd = plistlib.loads(contents[doc + DOCS[1]])
+                launchd = plistlib.loads(contents[doc + "packaging/launchd/org.zcalld.maintenance.plist.in"])
                 self.assertFalse(launchd["RunAtLoad"])
                 self.assertEqual(launchd["ProgramArguments"], ["@ZCALLD_BIN@", "plugins", "maintenance", "run-once"])
-                task = ET.fromstring(contents[doc + DOCS[2]])
+                task = ET.fromstring(contents[doc + "packaging/windows/zcalld-maintenance.xml.in"])
                 ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
                 self.assertEqual(task.find("t:Settings/t:Enabled", ns).text, "false")
                 self.assertEqual(task.find("t:Settings/t:MultipleInstancesPolicy", ns).text, "IgnoreNew")

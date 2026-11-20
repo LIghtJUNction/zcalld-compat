@@ -70,6 +70,8 @@ def stage_maintenance(prefix, goos):
     doc = prefix / "share/doc/zcalld-compat"
     for name in (
         "docs/CODEX-MAINTENANCE.md",
+        "docs/CLAUDE-MAINTENANCE.md",
+        "docs/CLAUDE-TUI-SOURCE.json",
         "packaging/launchd/org.zcalld.maintenance.plist.in",
         "packaging/windows/zcalld-maintenance.xml.in",
     ):
@@ -97,7 +99,7 @@ def build(target, out):
         prefix = stage if goos == "windows" else stage / "usr"
         libexec = prefix / "libexec/zcalld"
         libexec.mkdir(parents=True)
-        for name in ("zcalld-privacy", "zcalld-pluginctl"):
+        for name in ("zcalld-privacy", "zcalld-pluginctl", "zcalld-claude-tui"):
             binary = libexec / (name + (".exe" if goos == "windows" else ""))
             subprocess.run(["go", "build", "-mod=readonly", "-trimpath", "-buildvcs=false",
                             "-ldflags", flags, "-o", str(binary), "./cmd/" + name], cwd=ROOT, env=env, check=True)
@@ -113,12 +115,13 @@ def build(target, out):
                 shutil.copyfile(file, libexec / "builtin" / file.name)
         doc = prefix / "share/doc/zcalld-compat"
         doc.mkdir(parents=True)
-        for name in ("README.md", "NOTICE", "NOTICE_ROUTING.md", "NOTICE_MCP.md", "UPSTREAM.json"):
+        for name in ("README.md", "NOTICE", "NOTICE_ROUTING.md", "NOTICE_MCP.md", "NOTICE.magpie", "UPSTREAM.json"):
             shutil.copyfile(ROOT / name, doc / name)
         stage_maintenance(prefix, goos)
         license_dir = prefix / "share/licenses/zcalld-compat"
         license_dir.mkdir(parents=True)
         shutil.copyfile(ROOT / "LICENSE", license_dir / "LICENSE")
+        shutil.copyfile(ROOT / "LICENSE.magpie", license_dir / "LICENSE.magpie")
         shutil.copytree(ROOT / "LICENSES", license_dir / "third-party")
         (doc / "BUILD.json").write_text(json.dumps({
             "version": value, "revision": revision, "target": target,
