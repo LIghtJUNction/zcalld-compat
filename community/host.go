@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-//go:embed vendor/host.js vendor/pi.js
+//go:embed vendor/host.js vendor/pi.js vendor/mcp-tools.mjs
 var scripts embed.FS
 
 type Host struct {
@@ -30,27 +30,32 @@ type Host struct {
 }
 
 func Scripts(root string) (host, pi string, err error) {
-	for _, name := range []string{"host.js", "pi.js"} {
+	names := []string{"host.js", "pi.js", "mcp-tools.mjs"}
+	contents := make(map[string][]byte, len(names))
+	sum := sha256.New()
+	for _, name := range names {
 		b, e := scripts.ReadFile("vendor/" + name)
 		if e != nil {
 			err = e
 			return
 		}
-		sum := sha256.Sum256(b)
-		p := filepath.Join(root, "runtime", hex.EncodeToString(sum[:12])+"-"+name)
+		contents[name] = b
+		sum.Write([]byte(name))
+		sum.Write([]byte{0})
+		sum.Write(b)
+	}
+	directory := filepath.Join(root, "runtime", hex.EncodeToString(sum.Sum(nil)[:16]))
+	for _, name := range names {
+		b := contents[name]
+		p := filepath.Join(directory, name)
 		if old, e := os.ReadFile(p); e != nil || string(old) != string(b) {
 			if e = Atomic(p, b, 0600); e != nil {
 				err = e
 				return
 			}
 		}
-		if name == "host.js" {
-			host = p
-		} else {
-			pi = p
-		}
 	}
-	return
+	return filepath.Join(directory, "host.js"), filepath.Join(directory, "pi.js"), nil
 }
 func Start(root string) (*Host, error) {
 	r, err := Read(root)

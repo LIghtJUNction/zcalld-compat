@@ -1,3 +1,4 @@
+import { answerTools } from "./mcp-tools.mjs"
 // magpie's plugin host: runs OpenCode (v1) server plugins under Bun and
 // answers magpie over stdin/stdout, one JSON message a line.
 //
@@ -1926,11 +1927,13 @@ function parsedArgs(name, schema, args) {
 // took is ms as Go prints a duration: 300ms, 55s.
 const took = (ms) => (ms % 1000 ? `${ms}ms` : `${ms / 1000}s`)
 
-async function runTool({ spec, name, args, ms, agent }) {
+async function runTool({ spec, name, args, ms, agent }, signal) {
   const def = toolsOf(spec).get(name)
   if (!def) throw new Error(`${spec} has no tool ${name}`)
   args = parsedArgs(name, def.args, args)
-  const abort = AbortSignal.timeout(ms > 0 ? ms : 60_000)
+  const timeout = AbortSignal.timeout(ms > 0 ? ms : 60_000)
+  const abort = signal ? AbortSignal.any([signal,timeout]) : timeout
+  if (abort.aborted) throw new DOMException("Aborted", "AbortError")
   const ctx = {
     sessionID: "", messageID: "", callID: "", agent: agent ?? "",
     directory, worktree: directory, abort,
@@ -3645,6 +3648,28 @@ async function fetchAs(id, record, key, params) {
   }
 }
 
+async function doMcpHttp(id, record, params) {
+  const timer = setTimeout(() => record.controller.abort(), Math.min(Math.max(params.timeout_ms || 60000, 1), 3600000))
+  try {
+    checkFetch(record)
+    const body = await answerTools(params, loaded.map(withProviders), runTool, record.controller.signal)
+    checkFetch(record)
+    transitionFetch(record, "streaming")
+    await sendForFetch(record, {id, event:"head", status:200, headers:params.headers || {"content-type":"application/json"}})
+    for (let offset = 0; offset < body.length;) {
+      const n = await record.gate.take(Math.min(MAX_FRAME, body.length - offset))
+      checkFetch(record)
+      if (n <= 0) break
+      record.gate.spend(n + FRAME_OVERHEAD)
+      await sendForFetch(record, chunkLine(id, body.subarray(offset,offset+n).toString("base64")))
+      offset += n
+    }
+    checkFetch(record)
+    transitionFetch(record, "finishing")
+    await sendForFetch(record, {id,result:null})
+  } finally { clearTimeout(timer) }
+}
+
 // ---- the loop ----------------------------------------------------------------
 
 const handlers = {
@@ -3856,7 +3881,7 @@ rl.on("line", (line) => {
       .finally(() => { gatewayInflight.delete(msg.id); done() })
     return
   }
-  if (msg.method === "fetch") {
+  if (msg.method === "fetch" || msg.method === "mcpHttp") {
     const id = msg.id
     // the fetch is owned the moment its message is read, before the async
     // setup below: an abort that comes before the upstream is reached still
@@ -3873,7 +3898,7 @@ rl.on("line", (line) => {
     // promise itself is not cancelled — only this request's wait on it.
     const start = () => {
       checkFetch(record)
-      return doFetch(id, record, msg.params ?? {})
+      return msg.method === "mcpHttp" ? doMcpHttp(id, record, msg.params ?? {}) : doFetch(id, record, msg.params ?? {})
     }
     waitForReady(record).then(start)
       .catch((e) => {

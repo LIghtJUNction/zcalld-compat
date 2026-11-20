@@ -83,7 +83,7 @@ def build(target, out):
             binary.chmod(0o755)
             if goos == "linux" and goarch == "amd64" and platform.system() == "Linux" and platform.machine() == "x86_64":
                 subprocess.run([str(binary), "--version"], check=True)
-        for name in ("host.js", "pi.js"):
+        for name in ("host.js", "pi.js", "mcp-tools.mjs"):
             shutil.copyfile(ROOT / "community/vendor" / name, libexec / name)
         builtin = ROOT / "community/builtin"
         if builtin.exists():
@@ -92,7 +92,7 @@ def build(target, out):
                 shutil.copyfile(file, libexec / "builtin" / file.name)
         doc = prefix / "share/doc/zcalld-compat"
         doc.mkdir(parents=True)
-        for name in ("README.md", "NOTICE", "UPSTREAM.json"):
+        for name in ("README.md", "NOTICE", "NOTICE_ROUTING.md", "NOTICE_MCP.md", "UPSTREAM.json"):
             shutil.copyfile(ROOT / name, doc / name)
         license_dir = prefix / "share/licenses/zcalld-compat"
         license_dir.mkdir(parents=True)

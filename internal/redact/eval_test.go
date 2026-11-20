@@ -1,21 +1,17 @@
-//go:build magpie_model_corpus
-
 package redact_test
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
 
-	"github.com/LIghtJUNction/zcalld-compat/internal/pii"
+	"github.com/LIghtJUNction/zcalld-compat/internal/pii/guard"
 	"github.com/LIghtJUNction/zcalld-compat/internal/redact"
 )
 
@@ -31,39 +27,14 @@ import (
 //   - both:  the rules and the model with magpie's checks on what it found,
 //     as a user with the model on gets.
 //
-// Each local model (pii.Models) is scored on its own. What it said is
-// recorded in testdata (evalModels), so the test runs the whole of
-// "both" without the model or the network, and fails when a value that
-// came out right comes out wrong. A value known to come out wrong with a
-// model says so (evalValue.Known for Privacy Filter, GuardKnown for
-// AstrLink Guard, an issue), and fails once it comes out right, to have
-// it taken off.
-//
-// To ask the real models again, after a case is added or a new model,
-// point MAGPIE_EVAL_CACHE at the cache folder they were downloaded into
-// (the folder that holds magpie/privacy-filter, magpie/astrlink-guard);
-// each one there is asked:
-//
-//	MAGPIE_EVAL_CACHE=$HOME/.cache go test -run TestMaskEval -v ./internal/redact
-//
-// which writes the recording again and logs the table.
+// Replay the upstream model predictions stored with this corpus. This test
+// requires no model files, downloader, network, or user cache. The original
+// full-runtime recapture driver is archived under testdata/upstream-model-eval.go.txt.
 func TestMaskEval(t *testing.T) {
-	asked := 0
 	for _, em := range evalModels {
 		t.Run(em.id, func(t *testing.T) {
-			rec := readRecording(t, em.path)
-			if dir := os.Getenv("MAGPIE_EVAL_CACHE"); dir != "" {
-				if r, ok := askModel(t, dir, pii.Of(em.id)); ok {
-					rec = r
-					writeRecording(t, em.path, rec)
-					asked++
-				}
-			}
-			evalModel(t, rec, em.known, pii.Of(em.id).MinScore())
+			evalModel(t, readRecording(t, em.path), em.known, em.min)
 		})
-	}
-	if os.Getenv("MAGPIE_EVAL_CACHE") != "" && asked == 0 {
-		t.Fatal("no model is in MAGPIE_EVAL_CACHE")
 	}
 }
 
@@ -71,10 +42,11 @@ func TestMaskEval(t *testing.T) {
 // values known to come out wrong with it.
 var evalModels = []struct {
 	id, path string
+	min      float64
 	known    func(evalValue) string
 }{
-	{pii.PrivacyFilter, "testdata/eval-model.json", func(v evalValue) string { return v.Known }},
-	{pii.AstrLinkGuard, "testdata/eval-astrlink.json", func(v evalValue) string { return v.GuardKnown }},
+	{"privacy-filter", "testdata/eval-model.json", 0.5, func(v evalValue) string { return v.Known }},
+	{"astrlink-guard", "testdata/eval-astrlink.json", guard.MinScore, func(v evalValue) string { return v.GuardKnown }},
 }
 
 // evalModel scores the recording rec, keeping what the model was at
@@ -87,7 +59,7 @@ func evalModel(t *testing.T, rec map[string]recorded, known func(evalValue) stri
 		}
 	}
 	if len(stale) > 0 {
-		t.Fatalf("the model's recording is not of cases %v; record it again with MAGPIE_EVAL_CACHE (see TestMaskEval)", stale)
+		t.Fatalf("the model's recording is not of cases %v; refresh it using the archived upstream driver and full model runtime", stale)
 	}
 	kept := map[string]recorded{}
 	for id, r := range rec {
@@ -290,43 +262,4 @@ func readRecording(t *testing.T, recordingPath string) map[string]recorded {
 		t.Fatalf("%s: %v", recordingPath, err)
 	}
 	return rec
-}
-
-func writeRecording(t *testing.T, recordingPath string, rec map[string]recorded) {
-	b, err := json.MarshalIndent(rec, "", "\t")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tmp := recordingPath + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(tmp, recordingPath); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// askModel runs every case's text through the real model m, downloaded
-// into the cache folder dir, one text at a time, as a request's text
-// that has the model to itself is; false if m isn't there.
-func askModel(t *testing.T, dir string, m pii.Model) (map[string]recorded, bool) {
-	t.Setenv("XDG_CACHE_HOME", dir)
-	if !m.Installed() {
-		t.Logf("%s isn't in %s; its recording is kept", m.ID(), filepath.Join(dir, "magpie"))
-		return nil, false
-	}
-	defer m.Stop()
-	rec := map[string]recorded{}
-	for _, c := range evalCases {
-		got, err := m.Find(context.Background(), []string{c.Text})
-		if err != nil {
-			t.Fatalf("%s: %v", c.ID, err)
-		}
-		fs := got[0]
-		if fs == nil {
-			fs = []redact.Found{}
-		}
-		rec[c.ID] = recorded{Text: textHash(c.Text), Found: fs}
-	}
-	return rec, true
 }

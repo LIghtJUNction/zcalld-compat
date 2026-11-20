@@ -86,6 +86,17 @@ func run(args []string) error {
 	var result any
 	var err error
 	switch positional[0] {
+	case "import-mcp":
+		result, err = community.ImportMCP(root, source)
+	case "mcp":
+		action := "show"
+		if len(positional) > 2 {
+			return errors.New("mcp takes one action")
+		}
+		if len(positional) == 2 {
+			action = positional[1]
+		}
+		result, err = community.MCP(root, action)
 	case "handoff":
 		result, err = builtin.Handoff(root, account, owners)
 	case "accounts":
@@ -149,6 +160,14 @@ func run(args []string) error {
 	case "providers":
 		result, err = community.Providers(root)
 	case "runtime":
+		if len(positional) == 2 && positional[1] == "configure" {
+			err = community.ConfigureRuntime(root)
+			result = map[string]any{"ok": err == nil, "configured": err == nil, "host_config": filepath.Join(root, "host.json"), "restart_required": true}
+			break
+		}
+		if len(positional) != 1 {
+			return errors.New("runtime accepts only configure")
+		}
 		host, pi, e := community.Scripts(root)
 		err = e
 		result = map[string]any{"host": host, "pi": pi}

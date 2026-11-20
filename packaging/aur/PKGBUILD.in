@@ -34,6 +34,7 @@ package() {
   install -Dm755 zcalld-pluginctl "$pkgdir/usr/libexec/zcalld/zcalld-pluginctl"
   install -Dm644 community/vendor/host.js "$pkgdir/usr/libexec/zcalld/host.js"
   install -Dm644 community/vendor/pi.js "$pkgdir/usr/libexec/zcalld/pi.js"
+  install -Dm644 community/vendor/mcp-tools.mjs "$pkgdir/usr/libexec/zcalld/mcp-tools.mjs"
   if [[ -d community/builtin ]]; then
     local script
     for script in community/builtin/*.mjs community/builtin/catalog.json; do
@@ -45,5 +46,7 @@ package() {
   install -m644 LICENSES/*.txt "$pkgdir/usr/share/licenses/$pkgname/third-party/"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   install -Dm644 NOTICE "$pkgdir/usr/share/doc/$pkgname/NOTICE"
+  install -Dm644 NOTICE_ROUTING.md "$pkgdir/usr/share/doc/$pkgname/NOTICE_ROUTING.md"
+  install -Dm644 NOTICE_MCP.md "$pkgdir/usr/share/doc/$pkgname/NOTICE_MCP.md"
   install -Dm644 UPSTREAM.json "$pkgdir/usr/share/doc/$pkgname/UPSTREAM.json"
 }

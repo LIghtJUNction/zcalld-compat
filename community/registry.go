@@ -30,14 +30,16 @@ type Entry struct {
 	ConfigFile string         `json:"config_file,omitempty"`
 }
 type Registry struct {
-	Accounts        map[string]AccountMeta `json:"accounts,omitempty"`
-	AccountDefaults map[string]string      `json:"account_defaults,omitempty"`
-	Version         int                    `json:"version"`
-	Plugins         []Entry                `json:"plugins"`
-	Config          map[string]any         `json:"config,omitempty"`
-	Prefer          map[string]string      `json:"prefer,omitempty"`
-	ProviderOptions map[string]any         `json:"provider_options,omitempty"`
-	ModelsDevPath   string                 `json:"models_dev_path,omitempty"`
+	MCPToolsEnabled *bool                    `json:"mcp_tools_enabled,omitempty"`
+	MCPPermissions  map[string]MCPPermission `json:"mcp_permissions,omitempty"`
+	Accounts        map[string]AccountMeta   `json:"accounts,omitempty"`
+	AccountDefaults map[string]string        `json:"account_defaults,omitempty"`
+	Version         int                      `json:"version"`
+	Plugins         []Entry                  `json:"plugins"`
+	Config          map[string]any           `json:"config,omitempty"`
+	Prefer          map[string]string        `json:"prefer,omitempty"`
+	ProviderOptions map[string]any           `json:"provider_options,omitempty"`
+	ModelsDevPath   string                   `json:"models_dev_path,omitempty"`
 }
 
 func (e Entry) Public() map[string]any {

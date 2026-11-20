@@ -130,6 +130,9 @@ func ImportMagpie(root string, o ImportOptions) (map[string]any, error) {
 	if json.Unmarshal(b, &settings) != nil {
 		return nil, errors.New("Magpie settings are invalid")
 	}
+	if e = importMCPState(source, &r); e != nil {
+		return nil, e
+	}
 	stage, e := os.MkdirTemp(root, ".magpie-import-")
 	if e != nil {
 		return nil, e
@@ -280,5 +283,5 @@ func ImportMagpie(root string, o ImportOptions) (map[string]any, error) {
 	if e = Atomic(filepath.Join(o.PrivacyRoot, "plugin.json"), b, 0600); e != nil {
 		return nil, e
 	}
-	return map[string]any{"ok": true, "plugins": len(r.Plugins), "plugin_accounts": len(accounts), "copied_files": copied, "copied_bytes": bytes, "history_files": historyFiles, "model_files": modelFiles, "model_bytes": modelBytes, "builtin_oauth_imported": false, "community_config": filepath.Join(root, "host.json"), "privacy_config": filepath.Join(o.PrivacyRoot, "plugin.json")}, nil
+	return map[string]any{"ok": true, "plugins": len(r.Plugins), "plugin_accounts": len(accounts), "copied_files": copied, "copied_bytes": bytes, "history_files": historyFiles, "model_files": modelFiles, "model_bytes": modelBytes, "builtin_oauth_imported": false, "mcp_tools_enabled": r.MCPToolsEnabled, "mcp_caller_keys": len(r.MCPPermissions), "community_config": filepath.Join(root, "host.json"), "privacy_config": filepath.Join(o.PrivacyRoot, "plugin.json")}, nil
 }

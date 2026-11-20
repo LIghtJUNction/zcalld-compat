@@ -82,7 +82,7 @@ OAuth callbacks must run in the same host as authorization. `session` keeps that
 
 The privacy wrapper tests cover block behavior, setting reloads, the reversible disable switch, explicit-model failure, actual local-model classification, JSON tool arguments, and split SSE placeholders. Manager tests cover lifecycle changes, immutable Git pins, checksum tampering, copy boundaries, and suppressed package scripts. Parent gateway tests exercise real native libraries and Bun against loopback mock providers.
 
-Upstream model evaluation files that require the full Magpie download/cache subsystem are retained under the `magpie_model_corpus` build tag. The ordinary engine and Guard tests run without that subsystem. No test uses a paid inference endpoint or the user's live accounts.
+The model evaluation now replays both checked-in upstream prediction corpora in the default test suite, using the pinned model thresholds without a downloader, network, or user cache. The original full-runtime recapture driver is retained as the reference-only text fixture `internal/redact/testdata/upstream-model-eval.go.txt`; running that driver requires Magpie's full model registry and installed model files. It is not compiled into this package. No test uses a paid inference endpoint or the user's live accounts.
 
 ## Releases and packaging
 
@@ -141,3 +141,32 @@ The explicit `handoff --account KEY --owners /absolute/owners.json` operation
 verifies recorded Linux process identities have exited, re-reads the newest
 credential, and changes refresh ownership without a network request. Other
 platforms retain external ownership until equivalent verification is available.
+
+
+## Community tools MCP
+
+The native zcalld community extension serves installed plugins' tool exports at
+`/mcp/zcalld/tools` and preserves `/mcp/magpie/tools` for migrated agents. It
+reuses the existing lazy Bun host and does not open another listener. The helper
+embeds the host, pi, and MCP modules as one immutable script bundle.
+
+```sh
+zcalld-pluginctl --root /absolute/extensions runtime configure
+zcalld-pluginctl --root /absolute/extensions mcp show
+zcalld-pluginctl --root /absolute/extensions mcp enable
+zcalld-pluginctl --root /absolute/extensions mcp disable
+zcalld-pluginctl --root /absolute/extensions import-mcp --source /absolute/magpie-config
+```
+
+`runtime configure` writes the private host binding without starting plugins or
+refreshing accounts. Run it after upgrading this package, then restart the
+native gateway. `import-magpie` includes MCP state automatically; `import-mcp`
+updates an existing staged registry. Only permission metadata is copied into the
+derived MCP map, never gateway credentials. Unknown or unsupported nonempty
+budgets are refused rather than relaxed. Tool grants, issuer intersections,
+readonly/off/expiry, and FIFO concurrency restrictions are preserved.
+
+See [NOTICE_MCP.md](NOTICE_MCP.md) for the pinned upstream contract and licensing,
+and the [zcalld MCP guide](https://github.com/LIghtJUNction/zcalld/blob/main/docs/MCP.md)
+for endpoint behavior and native integration tests. `make check` includes both
+MCP and routing worker tests. No fixture uses a live account or provider.
