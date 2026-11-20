@@ -3,6 +3,7 @@
 import { authJSON, expiry, fetchSafe, headersFor, jwtClaims, jsonResponse, object,
   requestBody, safeBase, secret, sha256, sseEvents } from './common.mjs'
 import { createCodexMetadata } from './codex-metadata.mjs'
+import { createCodexMaintenance } from './codex-maintenance.mjs'
 import { createCodexCreditGuard } from './codex-credits.mjs'
 import { open } from 'node:fs/promises'
 import { constants } from 'node:fs'
@@ -237,6 +238,7 @@ export function createCodex({ fetcher = globalThis.fetch, baseURL = CODEX_BASE, 
       provider: PROVIDER,
       methods: [],
       codexMetadata,
+      codexMaintenance: createCodexMaintenance({ fetcher, externalAuth, accountID, clientHeaders, now }),
       // Refresh only when an operation needs the account. The host owns a
       // per-account, cross-process renewal lock and persists before releasing it.
       keepAlive: false,

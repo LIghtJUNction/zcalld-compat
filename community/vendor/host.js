@@ -3688,8 +3688,10 @@ async function fetchAs(id, record, key, params) {
       const said = await staleAccess(key, before)
       if (said) rh["x-magpie-sign-in"] = said
     }
+    if (record.captureResponse === true) { record.unconsumedBody = undefined; return res }
     await relayHttpResponse(id, record, res, rh)
   } catch (e) {
+    if (record.captureResponse === true) { transitionFetch(record, "finishing"); throw e }
     transitionFetch(record, "finishing")
     // a fetch hook that threw on its sign-in (a refresh the vendor turned
     // away) marks the account, as a built-in's refused refresh marked it
@@ -3765,6 +3767,51 @@ async function doCodexHttp(id, record, params) {
   } finally { clearTimeout(timer) }
 }
 
+async function maintenanceOf(operation, params, signal) {
+  const provider = "builtin:codex", key = params.account
+  if (typeof key !== "string" || !/^builtin:codex#[a-f0-9]{20}$/u.test(key))
+    throw new Error("Maintenance requires an explicitly imported Codex account")
+  for (const name of ["url", "prompt", "model", "policy", "no_credits"])
+    if (Object.hasOwn(params, name)) throw new Error("Unsupported maintenance input")
+  const policy = codexAccountPolicy(key)
+  const hook = auths().get(provider)?.auth?.codexMaintenance
+  if (typeof hook !== "function") throw new Error("Installed Codex adapter has no maintenance capability")
+  const remaining = params.deadline_ms - Date.now()
+  if (!Number.isFinite(remaining) || remaining <= 0 || remaining > 60000)
+    throw new Error("Maintenance deadline is invalid")
+  const controller = new AbortController()
+  const stop = () => controller.abort(signal?.reason)
+  signal?.addEventListener("abort", stop, { once: true })
+  if (signal?.aborted) stop()
+  const timer = setTimeout(() => controller.abort(), Math.ceil(remaining))
+  try {
+    return await inScope(provider, key, async () => {
+      // Existing owner-aware refresh may checkpoint after cancellation; the Go
+      // caller reserves the same bounded credential-drain budget for it.
+      await fresh(provider, key)
+      policy.assertCurrent()
+      if (controller.signal.aborted) throw new Error("Maintenance cancelled")
+      const request = { operation, account: key, deadline_ms: params.deadline_ms, signal: controller.signal,
+        windows: params.windows, credit_id: params.credit_id, redeem_request_id: params.redeem_request_id,
+        expected_expires_at: params.expected_expires_at, lead_minutes: params.lead_minutes }
+      return await hook(authCopy(key), request, {
+        noCredits: policy.codex_no_credits, assertCurrent: policy.assertCurrent,
+        generation: async (input) => {
+          policy.assertCurrent()
+          const record = { state: "setup", controller, gate: makeGate(512 << 10),
+            pendingSend: null, readyCleanup: null, unconsumedBody: undefined, captureResponse: true }
+          // Same loader, refresh, header hooks and final captured policy as a
+          // normal gateway request. The builtin module owns the fixed prompt.
+          return await fetchAs(0, record, key, { provider, account: key, model: input.model,
+            npm: "@ai-sdk/openai", url: "https://chatgpt.com/backend-api/codex/responses", method: "POST",
+            headers: { "content-type": "application/json" }, body: Buffer.from(JSON.stringify(input)).toString("base64") })
+        },
+      })
+    })
+  } catch { throw new Error("Codex maintenance operation failed") }
+  finally { clearTimeout(timer); signal?.removeEventListener("abort", stop); controller.abort() }
+}
+
 async function doMcpHttp(id, record, params) {
   const timer = setTimeout(() => record.controller.abort(), Math.min(Math.max(params.timeout_ms || 60000, 1), 3600000))
   try {
@@ -3833,6 +3880,9 @@ const handlers = {
   installCli,
   load,
   usage,
+  "maintenance.inspect": (p, signal) => maintenanceOf("inspect", p, signal),
+  "maintenance.warmup": (p, signal) => maintenanceOf("warmup", p, signal),
+  "maintenance.consume": (p, signal) => maintenanceOf("consume", p, signal),
   checkin,
   calls,
   keepSignedIn,

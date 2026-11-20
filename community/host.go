@@ -64,6 +64,10 @@ func Start(root string) (*Host, error) {
 }
 
 func startHost(root, source string, deadline time.Time) (*Host, error) {
+	return startHostBudget(root, source, deadline, time.Time{})
+}
+
+func startHostBudget(root, source string, deadline, drainDeadline time.Time) (*Host, error) {
 	r, err := Read(root)
 	if err != nil {
 		return nil, err
@@ -92,7 +96,7 @@ func startHost(root, source string, deadline time.Time) (*Host, error) {
 	}
 	scan := bufio.NewScanner(out)
 	scan.Buffer(make([]byte, 65536), 16<<20)
-	h := &Host{cmd: cmd, cancel: cancel, input: in, scan: scan, output: out}
+	h := &Host{cmd: cmd, cancel: cancel, input: in, scan: scan, output: out, drainDeadline: drainDeadline}
 	items := []any{}
 	for _, p := range r.Plugins {
 		if p.Enabled && p.Kind == "community" && (source == "" || p.Source == source) {

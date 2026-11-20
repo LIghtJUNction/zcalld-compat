@@ -32,17 +32,20 @@ func run(args []string) error {
 		return routing.Validate(os.Stdin, os.Stdout)
 	}
 	var root, revision, hash, name, version, file, source, privacyRoot, modelRoot, provider, label, account, owners, expectedPlan string
+	var desktopInbox string
 	var positional []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch a {
 		case "--json":
-		case "--root", "--revision", "--sha256", "--name", "--version", "--file", "--input-file", "--source", "--privacy-root", "--model-root", "--to-magpie", "--provider", "--label", "--account", "--owners", "--expect-plan":
+		case "--desktop-inbox", "--root", "--revision", "--sha256", "--name", "--version", "--file", "--input-file", "--source", "--privacy-root", "--model-root", "--to-magpie", "--provider", "--label", "--account", "--owners", "--expect-plan":
 			if i+1 == len(args) {
 				return errors.New("missing option value")
 			}
 			i++
 			switch a {
+			case "--desktop-inbox":
+				desktopInbox = args[i]
 			case "--expect-plan":
 				expectedPlan = args[i]
 			case "--provider":
@@ -88,6 +91,8 @@ func run(args []string) error {
 	var result any
 	var err error
 	switch positional[0] {
+	case "maintenance":
+		result, err = runMaintenance(root, source, expectedPlan, desktopInbox, positional[1:])
 	case "quota":
 		if len(positional) != 2 {
 			return errors.New("quota expects list or refresh --account ID")
