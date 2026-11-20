@@ -30,6 +30,7 @@ type Entry struct {
 	ConfigFile string         `json:"config_file,omitempty"`
 }
 type Registry struct {
+	CodexHTTP       *CodexHTTPConfig         `json:"codex_http,omitempty"`
 	MCPToolsEnabled *bool                    `json:"mcp_tools_enabled,omitempty"`
 	MCPPermissions  map[string]MCPPermission `json:"mcp_permissions,omitempty"`
 	Accounts        map[string]AccountMeta   `json:"accounts,omitempty"`

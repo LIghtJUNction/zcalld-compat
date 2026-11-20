@@ -2,6 +2,7 @@
 // internal/provider/{account,codex_request}.go at 1e174f8f9f613a920203a4658d259456fcab5d0d.
 import { authJSON, expiry, fetchSafe, headersFor, jwtClaims, jsonResponse, object,
   requestBody, safeBase, secret, sha256, sseEvents } from './common.mjs'
+import { createCodexMetadata } from './codex-metadata.mjs'
 import { open } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import path from 'node:path'
@@ -90,7 +91,8 @@ export function prepare(body) {
     if (!item || typeof item !== 'object') continue
     if (item.type === 'item_reference') throw new Error('Codex requires inline history; item_reference is unsupported')
     const notification = ['function_call_output', 'custom_tool_call_output'].includes(item.type) && !item.call_id
-    if (!notification) delete item.id
+    const compaction = ['compaction', 'compaction_summary', 'context_compaction'].includes(item.type)
+    if (!notification && !compaction) delete item.id
     if (!item.type || ['message', 'reasoning'].includes(item.type)) delete item.status
     if ((!item.type || item.type === 'message') && item.role === 'system') item.role = 'developer'
     if (typeof item.call_id === 'string' && item.call_id.length > 64) item.call_id = sha256(item.call_id.trim())
@@ -231,6 +233,7 @@ export function createCodex({ fetcher = globalThis.fetch, baseURL = CODEX_BASE, 
     auth: {
       provider: PROVIDER,
       methods: [],
+      codexMetadata: createCodexMetadata({ fetcher, externalAuth, accountID, clientHeaders, now }),
       // Refresh only when an operation needs the account. The host owns a
       // per-account, cross-process renewal lock and persists before releasing it.
       keepAlive: false,

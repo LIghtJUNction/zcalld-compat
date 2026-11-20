@@ -26,7 +26,7 @@ go build -o bin/zcalld-pluginctl ./cmd/zcalld-pluginctl
 go test ./privacy ./community ./internal/redact ./internal/lazyre ./internal/pii/guard
 ```
 
-The parent zcalld workspace builds the native `redact` and `community` adapters through zplugin. The installation layout places executables in `/usr/libexec/zcalld` and native plugins in `/usr/lib/zcalld/plugins`. Bun is needed only for JavaScript plugins; Git is needed only for Git installation sources.
+The parent zcalld workspace builds the native `redact` and `community` adapters through zplugin. Arch packages place helpers in `/usr/lib/zcalld-compat` with CLI links in `/usr/bin`; portable archives use `/usr/libexec/zcalld`. Native plugins are supplied by the core in `/usr/lib/zcalld/plugins`. Bun is needed only for JavaScript plugins; Git is needed only for Git installation sources.
 
 ## Manage packages
 
@@ -167,7 +167,7 @@ and build metadata. Source and generated AUR recipes are separate assets;
 SHA256SUMS covers every archive. Source staging requires a clean, committed tree.
 
 The source AUR package is `zcalld-compat`. It installs helpers and JavaScript
-resources below `/usr/libexec/zcalld`, notices below `/usr/share/doc/zcalld-compat`,
+resources below `/usr/lib/zcalld-compat` with CLI links in `/usr/bin`, notices below `/usr/share/doc/zcalld-compat`,
 and licenses below `/usr/share/licenses/zcalld-compat`. Bun and Git are optional
 runtime dependencies for JavaScript and pinned Git packages. The parent core
 package supplies the native adapters. Installing this package starts no service.
@@ -273,3 +273,39 @@ MCP and routing worker tests. No fixture uses a live account or provider.
 
 `zcalld plugins quota list --json` reads local capabilities and cached allowance windows only.
 `zcalld plugins quota refresh --account ACCOUNT_ID --json` explicitly updates one supported, enabled community account through its existing usage and renewal hooks. Credentials stay in the helper; imported quota files are preserved. Unsupported or externally managed accounts are not offered an invented refresh capability. See [the quota contract](https://github.com/LIghtJUNction/zcalld-compat/blob/main/docs/QUOTAS.md) for cancellation, private caching and JSON output.
+
+## Optional native Codex metadata
+
+With zcalld 0.4.0 and this component 0.2.0 or newer, the native community
+extension can serve Codex 0.170's read-only model catalog, usage, account
+bootstrap and config bundle requests. This is disabled by default and reuses
+the lazy host. It requires an explicit local provider/account binding; remote
+callers also require a verified caller-key binding.
+
+```sh
+zcalld-pluginctl --root /absolute/extensions codex configure --file /absolute/bindings.json
+zcalld-pluginctl --root /absolute/extensions runtime configure
+zcalld-pluginctl --root /absolute/extensions codex show
+zcalld-pluginctl --root /absolute/extensions codex disable
+```
+
+The binding object has `enabled`, optional `loopback`, and optional `callers`
+fields. Each binding contains an existing local `provider` ID and nonempty
+`routes` list. Caller entries use gateway caller-key IDs, never their secrets.
+Configuration is bounded, validated and saved atomically; invalid input leaves
+the registry unchanged. These commands do not start Bun, refresh accounts or
+restart the gateway.
+
+The metadata hook uses a fixed official origin and four read-only operations.
+It does not invoke loaders, generation or token refresh. External credentials
+remain read-only. Instructions come from the bound account's upstream catalog;
+only explicit static route-to-slug aliases are exposed. Validated raw usage,
+bootstrap and config JSON is preserved. A request deadline includes shared
+initialization; canceling one request does not terminate the shared host.
+Native initialization fails closed if an enabled plugin cannot load; the
+management CLI retains partial-load diagnostics.
+
+See [the gateway configuration and endpoint contract](https://github.com/LIghtJUNction/zcalld/blob/main/docs/CODEX.md).
+Tests use synthetic credentials. The ordinary Responses adapter also retains
+opaque compaction IDs and encrypted content, with plaintext privacy processing
+still enabled.

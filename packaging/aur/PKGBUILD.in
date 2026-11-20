@@ -6,7 +6,7 @@ pkgdesc='Optional privacy worker and community plugin compatibility for zcalld'
 arch=('x86_64' 'aarch64')
 url='https://github.com/LIghtJUNction/zcalld-compat'
 license=('MIT')
-depends=('glibc' 'zcalld>=0.2.3')
+depends=('glibc' 'zcalld>=0.4.0')
 makedepends=('go>=1.26.8')
 optdepends=('bun: JavaScript community plugin runtime' 'git: install pinned Git community sources')
 options=('!lto')

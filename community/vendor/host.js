@@ -3597,13 +3597,29 @@ async function fetchAs(id, record, key, params) {
     })
     record.unconsumedBody = res.body
     checkFetch(record)
-    transitionFetch(record, "streaming")
     const rh = {}
     res.headers.forEach((v, k) => (rh[k] = v))
     if (res.status === 401 && !("x-magpie-sign-in" in rh) && key) {
       const said = await staleAccess(key, before)
       if (said) rh["x-magpie-sign-in"] = said
     }
+    await relayHttpResponse(id, record, res, rh)
+  } catch (e) {
+    transitionFetch(record, "finishing")
+    // a fetch hook that threw on its sign-in (a refresh the vendor turned
+    // away) marks the account, as a built-in's refused refresh marked it
+    if (["expired", "kept", "renewed"].includes(e?.signIn) && key) send({ event: "signIn", provider, account: key, said: e.signIn })
+    // a fetch the host already gave up on needs no late error: its slot is
+    // gone, and queueing an uncancellable line for it would only be noise
+    await sendForFetch(record, { id, error: { message: String(e?.message ?? e) } })
+  }
+}
+
+async function relayHttpResponse(id, record, res, rh) {
+  const { gate } = record
+  record.unconsumedBody = res.body
+  checkFetch(record)
+  transitionFetch(record, "streaming")
     const head = headCost(rh)
     if (head.entries > HEAD_ENTRIES || head.n > HEAD_MAX) {
       // the reply's head is past magpie's envelope: give the fetch up rather
@@ -3637,15 +3653,31 @@ async function fetchAs(id, record, key, params) {
     checkFetch(record)
     transitionFetch(record, "finishing")
     await sendForFetch(record, { id, result: null })
-  } catch (e) {
-    transitionFetch(record, "finishing")
-    // a fetch hook that threw on its sign-in (a refresh the vendor turned
-    // away) marks the account, as a built-in's refused refresh marked it
-    if (["expired", "kept", "renewed"].includes(e?.signIn) && key) send({ event: "signIn", provider, account: key, said: e.signIn })
-    // a fetch the host already gave up on needs no late error: its slot is
-    // gone, and queueing an uncancellable line for it would only be noise
-    await sendForFetch(record, { id, error: { message: String(e?.message ?? e) } })
-  }
+}
+
+async function doCodexHttp(id, record, params) {
+  const provider = "builtin:codex"
+  const key = params.account
+  if (params.provider !== provider || typeof key !== "string" || !key ||
+      key.length > 256 || providerOf(key) !== provider) throw new Error("Codex metadata requires an explicit bound account")
+  const hook = auths().get(provider)?.auth?.codexMetadata
+  if (typeof hook !== "function") throw new Error("Installed Codex adapter has no metadata capability")
+  const auth = authCopy(key)
+  if (!auth) throw new Error("The bound Codex account is unavailable")
+  const timer = setTimeout(() => record.controller.abort(), Math.min(Math.max(params.timeout_ms || 30000, 1), 30000))
+  try {
+    checkFetch(record)
+    // Deliberately bypass options/fresh/chat.headers/staleAccess. Metadata only
+    // borrows an existing access token, including a read-only external source.
+    const res = await hook(auth, {
+      operation: params.operation, client_version: params.client_version,
+      account_hint: params.account_hint, models: params.models, timeout_ms: params.timeout_ms,
+      max_response_bytes: params.max_response_bytes, signal: record.controller.signal,
+    })
+    const rh = {}
+    res.headers.forEach((v, k) => (rh[k] = v))
+    await relayHttpResponse(id, record, res, rh)
+  } finally { clearTimeout(timer) }
 }
 
 async function doMcpHttp(id, record, params) {
@@ -3672,6 +3704,9 @@ async function doMcpHttp(id, record, params) {
 
 // ---- the loop ----------------------------------------------------------------
 
+// Native gateway calls fail closed when an enabled plugin cannot initialize.
+// The management CLI keeps its existing partial-load diagnostics.
+let nativeStrictInit = false
 const handlers = {
   gatewayStates() {
     return Object.fromEntries(gatewayHooks.map(({ spec, state }) => [spec, {
@@ -3681,6 +3716,7 @@ const handlers = {
     }]))
   },
   async init(p) {
+    nativeStrictInit = p.nativeStrict === true
     authPath = p.authPath
     modelsDevPath = p.modelsDevPath ?? ""
     piPath = p.piPath ?? ""
@@ -3691,6 +3727,9 @@ const handlers = {
     if (p.loadMillis > 0) loadWait = p.loadMillis
     if (p.listMillis > 0) listWait = p.listMillis
     await loadPlugins(p.plugins ?? [])
+    if (nativeStrictInit && loaded.some((plugin) => typeof plugin.error === "string" && plugin.error)) {
+      throw new Error("An enabled community plugin failed to initialize")
+    }
     // from here on, when magpie holds this host as the one calls go to
     watchHeavy(p.heavy)
     return { plugins: loaded.map(withProviders) }
@@ -3876,12 +3915,18 @@ rl.on("line", (line) => {
           if (!ctl.signal.aborted) return send({ id: msg.id, result })
           if (msg.params?.operation === "begin" && result?.id) closeGateway(gatewayRuns.get(result.id))
         },
-        () => { if (!ctl.signal.aborted) return send({ id: msg.id, result: null }) },
+        () => {
+          if (ctl.signal.aborted) return
+          if (nativeStrictInit && readyState?.error) {
+            return send({ id: msg.id, error: { message: "Community plugin initialization failed" } })
+          }
+          return send({ id: msg.id, result: null })
+        },
       )
       .finally(() => { gatewayInflight.delete(msg.id); done() })
     return
   }
-  if (msg.method === "fetch" || msg.method === "mcpHttp") {
+  if (msg.method === "fetch" || msg.method === "mcpHttp" || msg.method === "codexHttp") {
     const id = msg.id
     // the fetch is owned the moment its message is read, before the async
     // setup below: an abort that comes before the upstream is reached still
@@ -3898,7 +3943,8 @@ rl.on("line", (line) => {
     // promise itself is not cancelled — only this request's wait on it.
     const start = () => {
       checkFetch(record)
-      return msg.method === "mcpHttp" ? doMcpHttp(id, record, msg.params ?? {}) : doFetch(id, record, msg.params ?? {})
+      return msg.method === "mcpHttp" ? doMcpHttp(id, record, msg.params ?? {}) :
+        msg.method === "codexHttp" ? doCodexHttp(id, record, msg.params ?? {}) : doFetch(id, record, msg.params ?? {})
     }
     waitForReady(record).then(start)
       .catch((e) => {

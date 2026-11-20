@@ -106,6 +106,15 @@ func run(args []string) error {
 		}
 	case "import-mcp":
 		result, err = community.ImportMCP(root, source)
+	case "codex":
+		action := "show"
+		if len(positional) > 2 {
+			return errors.New("codex takes one action")
+		}
+		if len(positional) == 2 {
+			action = positional[1]
+		}
+		result, err = community.CodexHTTP(root, action, file)
 	case "mcp":
 		action := "show"
 		if len(positional) > 2 {
