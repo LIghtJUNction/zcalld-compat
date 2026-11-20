@@ -1,7 +1,7 @@
 import { test, expect } from 'bun:test'
-import { createCodex, collect as collectCodex } from '../codex.mjs'
-import { createCopilot } from '../copilot.mjs'
-import { createCodeAssist } from '../codeassist.mjs'
+import { createCodex, collect as collectCodex } from '../codex-impl.mjs'
+import { createCopilot } from '../copilot-impl.mjs'
+import { createCodeAssist } from '../codeassist-impl.mjs'
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -211,7 +211,7 @@ test('two real Bun hosts serialize one rotating Codex refresh and persist its re
     await new Promise((resolve) => setTimeout(resolve, 80))
     return Response.json({ access_token: 'fixture-rotated-access', refresh_token: 'fixture-rotated-refresh', expires_in: 3600 })
   } })
-  const module = path.resolve(import.meta.dir, '../codex.mjs')
+  const module = path.resolve(import.meta.dir, '../codex-impl.mjs')
   const fixture = path.join(dir, 'provider.mjs')
   await writeFile(fixture, `import {createCodex} from ${JSON.stringify(module)}; export default async()=>createCodex({tokenURL:${JSON.stringify(`http://127.0.0.1:${server.port}/token`)},testMode:true});`)
   const authPath = path.join(dir, 'plugin-auth.json')
