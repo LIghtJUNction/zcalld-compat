@@ -1,0 +1,124 @@
+name: Windows native candidate check
+
+# Manual diagnostic gate only. A successful candidate is not a release and
+# does not replace the five native jobs in release.yml.
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact candidate commit (40 lowercase hexadecimal characters)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-native-candidate-${{ inputs.commit }}
+  cancel-in-progress: false
+
+jobs:
+  windows-native:
+    name: Windows native candidate only
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      SOURCE_COMMIT: ${{ inputs.commit }}
+      TARGET: windows-x86_64
+      GOTOOLCHAIN: local
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - name: Require an exact commit
+        run: |
+          if [[ ! "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'commit must be an exact 40-character lowercase hexadecimal SHA' >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify candidate identity
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          test "$(git rev-parse "$SOURCE_COMMIT^{commit}")" = "$SOURCE_COMMIT"
+          mkdir -p candidate-logs
+          {
+            echo 'candidate_only=true'
+            echo "commit=$SOURCE_COMMIT"
+            echo "tree=$(git rev-parse HEAD^{tree})"
+            echo "version=$(cat VERSION)"
+            echo "target=$TARGET"
+            echo "run_id=$GITHUB_RUN_ID"
+            echo "run_attempt=$GITHUB_RUN_ATTEMPT"
+            echo 'build_and_test_logs=last_2097152_bytes_each'
+          } > candidate-logs/source.txt
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.8'
+          cache: true
+
+      - name: Build candidate portable workers and assets
+        id: build
+        run: |
+          raw_log="$RUNNER_TEMP/zcalld-compat-candidate-build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.log"
+          set +e
+          python scripts/release.py build --target "$TARGET" > "$raw_log" 2>&1
+          result=$?
+          set -e
+          tail -c 2097152 "$raw_log" | tee candidate-logs/build.log
+          rm -f -- "$raw_log"
+          exit "$result"
+
+      - name: Execute native Claude helpers with synthetic accounts
+        id: native
+        run: |
+          raw_log="$RUNNER_TEMP/zcalld-compat-candidate-native-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.log"
+          set +e
+          python scripts/test-native-claude.py --target "$TARGET" > "$raw_log" 2>&1
+          result=$?
+          set -e
+          tail -c 2097152 "$raw_log" | tee candidate-logs/native.log
+          rm -f -- "$raw_log"
+          exit "$result"
+
+      - name: Record candidate outcome
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          NATIVE_OUTCOME: ${{ steps.native.outcome }}
+        run: |
+          mkdir -p candidate-logs
+          {
+            echo 'candidate_only=true'
+            echo "build=$BUILD_OUTCOME"
+            echo "native=$NATIVE_OUTCOME"
+          } > candidate-logs/outcome.txt
+
+      - name: Save bounded candidate logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: candidate-windows-native-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: candidate-logs/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Save candidate archive (not a release)
+        if: ${{ always() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: candidate-windows-native-archive-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/zcalld-compat-*-windows-x86_64.zip
+            candidate-logs/source.txt
+            candidate-logs/outcome.txt
+          if-no-files-found: error
+          retention-days: 7
