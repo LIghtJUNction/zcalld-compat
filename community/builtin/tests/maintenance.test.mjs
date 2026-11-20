@@ -1,5 +1,9 @@
 import { describe, test, expect } from 'bun:test'
 import { createCodexMaintenance } from '../codex-maintenance.mjs'
+import { externalAuth, accountID, clientHeaders } from '../codex-impl.mjs'
+import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 
 const ACCOUNT = 'builtin:codex#0123456789abcdefabcd'
 const NOW = Date.parse('2026-11-20T10:00:00Z')
@@ -30,6 +34,7 @@ function setup(options = {}) {
   const stored = { type: 'oauth', access: 'synthetic-token', expires: NOW + 3600000, accountId: 'synthetic-account', refreshOwner: 'host' }
   const trusted = {
     assertCurrent: options.assertCurrent || (() => {}), noCredits: true,
+    readAuth: options.readAuth || (() => structuredClone(stored)),
     generation: async (input, signal) => {
       generations.push(input)
       expect(signal.aborted).toBe(false)
@@ -41,6 +46,44 @@ function setup(options = {}) {
 }
 
 describe('fixed optional Codex maintenance', () => {
+  test('before-credits uses the original explicit unlimited or has-credits rule', async () => {
+    for (const [credits, expected] of [
+      [{ unlimited: true }, true],
+      [{ has_credits: true, unlimited: false, balance: 'unknown' }, true],
+      [{ has_credits: true, balance: '' }, true],
+      [{ has_credits: true, balance: '1.5' }, true],
+      [{ has_credits: true, balance: '0' }, false],
+      [{ has_credits: true, balance: '-2' }, false],
+      [{ has_credits: true, balance: 'NaN' }, false],
+      [{ balance: '20' }, false],
+      [undefined, false],
+    ]) {
+      const quota = { rate_limit: { allowed: false, limit_reached: true,
+        secondary_window: { used_percent: 100, limit_window_seconds: 604800, reset_at: NOW / 1000 + 86400 } },
+        rate_limit_reset_credits: { available_count: 1 }, ...(credits ? { credits } : {}) }
+      const s = setup({ quota }); s.trusted.noCredits = false
+      const snapshot = await s.call('inspect')
+      expect(snapshot.on_credits).toBe(expected)
+      const result = await s.call('consume', { purpose: 'week', trigger: 'before_credits',
+        credit_id: 'card-1', redeem_request_id: ID, expected_expires_at: END,
+        expected_week_until: new Date(NOW + 86400000).toISOString(), lead_minutes: 30 })
+      expect(s.requests.filter(r => r.init.method === 'POST')).toHaveLength(expected ? 1 : 0)
+      expect(result.status).toBe(expected ? 'completed' : 'not_sent')
+    }
+  })
+  test('NoCredits forbids before-credits but exhausted routing can use a nonexpiring card', async () => {
+    const quota = { rate_limit: { limit_reached: true,
+      secondary_window: { used_percent: 100, limit_window_seconds: 604800, reset_at: NOW / 1000 + 86400 } },
+      credits: { unlimited: true }, rate_limit_reset_credits: { available_count: 1 } }
+    for (const trigger of ['before_credits', 'routes_exhausted']) {
+      const s = setup({ quota, cards: { available_count: 1, credits: [{ id: 'card-1', status: 'available', expires_at: null }] } })
+      const result = await s.call('consume', { purpose: 'week', trigger, credit_id: 'card-1', redeem_request_id: ID,
+        expected_expires_at: null, expected_week_until: new Date(NOW + 86400000).toISOString(), lead_minutes: 30 })
+      const send = trigger === 'routes_exhausted'
+      expect(result.status).toBe(send ? 'completed' : 'not_sent')
+      expect(s.requests.filter(r => r.init.method === 'POST')).toHaveLength(send ? 1 : 0)
+    }
+  })
   test('fresh inspection proves windows and available credit expiry without exposing auth', async () => {
     const s = setup(), value = await s.call('inspect')
     expect(value.usage_known).toBe(true)
@@ -102,6 +145,53 @@ describe('fixed optional Codex maintenance', () => {
       const s = setup({ cards })
       expect((await s.call('consume', { credit_id: 'card-1', redeem_request_id: ID, expected_expires_at: END, lead_minutes: 30 })).status).toBe('not_sent')
       expect(s.requests.filter(r => r.init.method === 'POST')).toHaveLength(0)
+    }
+  })
+  test('consume rejects current external member, token or owner changes before any POST', async () => {
+    for (const change of ['member', 'renewal', 'owner']) {
+      const directory = await mkdtemp(path.join(tmpdir(), 'zcalld-consume-auth-'))
+      try {
+        const native = path.join(directory, 'native-auth.json')
+        const registryAuth = path.join(directory, 'plugin-auth.json')
+        const token = (member, serial) => 'fixture.' + Buffer.from(JSON.stringify({
+          sub: member, jti: serial, exp: NOW / 1000 + 3600,
+          'https://api.openai.com/auth': { chatgpt_account_id: 'same-workspace' },
+        })).toString('base64url') + '.fixture'
+        const first = token('member-a', 'first')
+        const nativeBody = access => JSON.stringify({ tokens: { access_token: access, account_id: 'same-workspace' } })
+        const stored = { type: 'oauth', access: first, accountId: 'same-workspace', expires: NOW + 3600000,
+          refreshOwner: 'external', sourceAuthFile: native }
+        await writeFile(native, nativeBody(first), { mode: 0o600 })
+        await writeFile(registryAuth, JSON.stringify(stored), { mode: 0o600 })
+        let posts = 0, authReads = 0
+        const hook = createCodexMaintenance({ now: () => NOW, externalAuth, accountID, clientHeaders,
+          fetcher: async (url, init) => {
+            expect(new URL(url).origin).toBe('https://chatgpt.com')
+            if (init.method === 'POST') { posts++; return json({ code: 'reset' }) }
+            if (String(url).includes('/wham/usage')) return json({ rate_limit: { allowed: true,
+              primary_window: { used_percent: 20, limit_window_seconds: 18000, reset_at: NOW / 1000 + 3600 },
+              secondary_window: { used_percent: 0, limit_window_seconds: 604800, reset_at: NOW / 1000 + 604800 },
+            }, rate_limit_reset_credits: { available_count: 1 } })
+            if (String(url).includes('/codex/models')) return json({ models: [{ slug: 'fixture-mini' }] })
+            if (String(url).endsWith('/rate-limit-reset-credits')) {
+              if (change === 'owner') await writeFile(registryAuth, JSON.stringify({ ...stored, refreshOwner: 'host' }))
+              else await writeFile(native, nativeBody(token(change === 'member' ? 'member-b' : 'member-a', 'next')))
+              return json({ available_count: 1, credits: [{ id: 'card-1', status: 'available', expires_at: END }] })
+            }
+            throw new Error('unexpected mock URL')
+          },
+        })
+        const request = { account: ACCOUNT, operation: 'consume', deadline_ms: NOW + 25000,
+          credit_id: 'card-1', redeem_request_id: ID, expected_expires_at: END, lead_minutes: 30 }
+        const result = await hook(stored, request, { noCredits: true, assertCurrent() {},
+          readAuth: async () => { authReads++; return JSON.parse(await readFile(registryAuth, 'utf8')) },
+        })
+        expect(result).toEqual({ status: 'not_sent', code: 'credentials_changed' })
+        expect(posts).toBe(0)
+        expect(authReads).toBe(1)
+        expect(request.redeem_request_id).toBe(ID)
+        expect(JSON.stringify(result)).not.toContain(first)
+      } finally { await rm(directory, { recursive: true, force: true }) }
     }
   })
   test('after-send failure is unknown and a caller cannot inject endpoints or prompts', async () => {

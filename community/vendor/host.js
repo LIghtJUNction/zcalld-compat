@@ -3847,7 +3847,8 @@ async function maintenanceOf(operation, params, signal) {
       if (controller.signal.aborted) throw new Error("Maintenance cancelled")
       const request = { operation, account: key, deadline_ms: params.deadline_ms, signal: controller.signal,
         windows: params.windows, credit_id: params.credit_id, redeem_request_id: params.redeem_request_id,
-        expected_expires_at: params.expected_expires_at, lead_minutes: params.lead_minutes }
+        expected_expires_at: params.expected_expires_at, lead_minutes: params.lead_minutes,
+        purpose: params.purpose, trigger: params.trigger, expected_week_until: params.expected_week_until }
       return await hook(authCopy(key), request, {
         noCredits: policy.codex_no_credits, assertCurrent: policy.assertCurrent,
         readAuth: () => {

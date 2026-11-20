@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -10,6 +11,15 @@ import (
 	"github.com/LIghtJUNction/zcalld-compat/community"
 	"github.com/LIghtJUNction/zcalld-compat/maintenance"
 )
+
+func runMaintenanceWorker(root, source, expected, inbox string) error {
+	if source != "" || expected != "" || inbox != "" {
+		return errors.New("maintenance worker takes only --root")
+	}
+	return maintenance.ServeWorker(context.Background(), os.Stdin, os.Stdout, func(ctx context.Context, account string, trigger maintenance.WeeklyTrigger) (maintenance.ActionResult, error) {
+		return community.MaintenanceWeekly(ctx, root, account, trigger)
+	})
+}
 
 func runMaintenance(root, source, expected, inbox string, args []string) (any, error) {
 	if len(args) != 1 {

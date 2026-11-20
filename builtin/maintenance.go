@@ -72,6 +72,17 @@ func buildMaintenancePlan(root, source string, registry community.Registry) (mai
 		}
 		files[name] = b
 	}
+	for _, name := range []string{"codex-autoreset.json", "codex-resets-used.json"} {
+		b, readErr := maintenanceBytes(filepath.Join(source, name), 2<<20)
+		if errors.Is(readErr, os.ErrNotExist) {
+			files[name] = nil
+			continue
+		}
+		if readErr != nil {
+			return result, readErr
+		}
+		files[name] = b
+	}
 	var logins []policyLogin
 	if json.Unmarshal(files["logins.json"], &logins) != nil || len(logins) > 4096 {
 		return result, errors.New("invalid maintenance snapshot identities")
@@ -125,13 +136,13 @@ func buildMaintenancePlan(root, source string, registry community.Registry) (mai
 			links = append(links, maintenance.AccountLink{SourceUser: user, Account: account.Key, Enabled: true})
 		}
 	}
-	result.Plan, err = maintenance.PlanImport(files["settings.json"], files["codex-warmup.json"], links)
+	result.Plan, err = maintenance.PlanImportLedgers(files["settings.json"], files["codex-warmup.json"], files["codex-autoreset.json"], files["codex-resets-used.json"], links)
 	if err != nil {
 		return result, err
 	}
 	inputs := map[string]any{}
 	for name, b := range files {
-		inputs[name] = map[string]string{"path": filepath.Join(source, name), "sha256": byteDigest(b)}
+		inputs[name] = map[string]any{"path": filepath.Join(source, name), "present": b != nil, "sha256": byteDigest(b)}
 	}
 	result.Hash = digest(object{"snapshot": source, "files": inputs, "mapping_sha256": byteDigest(mapBytes), "accounts": registry.Accounts, "plan": result.Plan.Hash})
 	result.Matched = len(links)
@@ -189,14 +200,23 @@ func MaintenancePlan(root, source, expected string, apply bool) (map[string]any,
 			return nil, err
 		}
 	}
-	weekly, resets := 0, 0
+	weekly, short, scheduled, weekReset, resets := 0, 0, 0, 0, 0
 	for _, p := range p.Plan.Accounts {
 		if p.WeeklyWarmup {
 			weekly++
+		}
+		if p.FiveHourWarmup {
+			short++
+		}
+		if len(p.WarmAts) > 0 {
+			scheduled++
+		}
+		if p.WeeklyReset {
+			weekReset++
 		}
 		if p.ExpiringReset {
 			resets++
 		}
 	}
-	return map[string]any{"ok": true, "read_only": !apply, "plan_hash": p.Hash, "matched_accounts": p.Matched, "policy_accounts": len(p.Plan.Accounts), "weekly_warmup": weekly, "expiring_reset": resets, "unmapped_accounts": p.Plan.UnmappedAccounts, "blocked": blocked, "enabled": enabled, "credentials_changed": false, "no_credits_changed": false, "scheduler_changed": false}, nil
+	return map[string]any{"ok": true, "read_only": !apply, "plan_hash": p.Hash, "matched_accounts": p.Matched, "policy_accounts": len(p.Plan.Accounts), "weekly_warmup": weekly, "five_hour_warmup": short, "scheduled_warmup": scheduled, "weekly_reset": weekReset, "expiring_reset": resets, "weekly_history_unknown": p.Plan.WeeklyHistoryUnknown, "unmapped_accounts": p.Plan.UnmappedAccounts, "blocked": blocked, "enabled": enabled, "credentials_changed": false, "no_credits_changed": false, "scheduler_changed": false}, nil
 }

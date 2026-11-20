@@ -82,6 +82,15 @@ func startPinnedHostBudget(root string, entry Entry, deadline, drainDeadline tim
 	return startHostSelected(root, entry.Source, deadline, drainDeadline, &entry)
 }
 func startHostSelected(root, source string, deadline, drainDeadline time.Time, pinned *Entry) (*Host, error) {
+	return startHostSelectedContext(context.Background(), root, source, deadline, drainDeadline, pinned)
+}
+func startPinnedHostBudgetContext(operationContext context.Context, root string, entry Entry, deadline, drainDeadline time.Time) (*Host, error) {
+	return startHostSelectedContext(operationContext, root, entry.Source, deadline, drainDeadline, &entry)
+}
+func startHostSelectedContext(operationContext context.Context, root, source string, deadline, drainDeadline time.Time, pinned *Entry) (*Host, error) {
+	if err := operationContext.Err(); err != nil {
+		return nil, err
+	}
 	r, err := Read(root)
 	if err != nil {
 		return nil, err
@@ -105,6 +114,8 @@ func startHostSelected(root, source string, deadline, drainDeadline time.Time, p
 	if err != nil {
 		return nil, err
 	}
+	// Parent cancellation goes through the RPC abort/EOF/drain path. Only its
+	// bounded fallback cancels the process, so credential checkpoints may finish.
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, "bun", host)
 	cmd.Dir = root
@@ -138,7 +149,7 @@ func startHostSelected(root, source string, deadline, drainDeadline time.Time, p
 			Error string `json:"error"`
 		} `json:"plugins"`
 	}
-	if err = h.callUntil("init", params, &loaded, deadline); err != nil {
+	if err = h.callUntilContext(operationContext, "init", params, &loaded, deadline); err != nil {
 		h.Close()
 		return nil, err
 	}
@@ -151,6 +162,10 @@ func startHostSelected(root, source string, deadline, drainDeadline time.Time, p
 			h.Close()
 			return nil, errors.New("an enabled community plugin could not load")
 		}
+	}
+	if err := operationContext.Err(); err != nil {
+		h.Close()
+		return nil, err
 	}
 	return h, nil
 }

@@ -1,6 +1,7 @@
 package community
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -39,6 +40,12 @@ func verifiedBuiltinCodex(root string, r Registry) (Entry, string) {
 // Both usage and maintenance may borrow this exact builtin host. The pinned
 // launch rechecks the registry and cannot load another same-named package.
 func startBuiltinCodexHost(root string, operationDeadline, drainDeadline time.Time) (*Host, error) {
+	return startBuiltinCodexHostContext(context.Background(), root, operationDeadline, drainDeadline)
+}
+func startBuiltinCodexHostContext(ctx context.Context, root string, operationDeadline, drainDeadline time.Time) (*Host, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	registry, err := Read(root)
 	if err != nil {
 		return nil, err
@@ -47,7 +54,7 @@ func startBuiltinCodexHost(root string, operationDeadline, drainDeadline time.Ti
 	if reason != "" {
 		return nil, errors.New("the verified builtin Codex adapter is unavailable")
 	}
-	host, err := startPinnedHostBudget(root, entry, operationDeadline, drainDeadline)
+	host, err := startPinnedHostBudgetContext(ctx, root, entry, operationDeadline, drainDeadline)
 	if err != nil {
 		return nil, err
 	}

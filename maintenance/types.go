@@ -26,9 +26,12 @@ var (
 )
 
 type AccountPolicy struct {
-	WeeklyWarmup     bool `json:"weekly_warmup"`
-	ExpiringReset    bool `json:"expiring_reset"`
-	ResetLeadMinutes int  `json:"reset_lead_minutes"`
+	WeeklyWarmup     bool     `json:"weekly_warmup"`
+	FiveHourWarmup   bool     `json:"five_hour_warmup,omitempty"`
+	WarmAts          []string `json:"warm_ats,omitempty"`
+	WeeklyReset      bool     `json:"weekly_reset,omitempty"`
+	ExpiringReset    bool     `json:"expiring_reset"`
+	ResetLeadMinutes int      `json:"reset_lead_minutes"`
 }
 
 type Policy struct {
@@ -52,11 +55,27 @@ type WarmWindow struct {
 }
 
 type WarmIntent struct {
-	Phase      string    `json:"phase"`
-	Windows    []string  `json:"windows"`
-	PreparedAt time.Time `json:"prepared_at"`
-	AttemptAt  time.Time `json:"attempt_at,omitempty"`
+	Phase      string            `json:"phase"`
+	Windows    []string          `json:"windows"`
+	PreparedAt time.Time         `json:"prepared_at"`
+	AttemptAt  time.Time         `json:"attempt_at,omitempty"`
+	Daily      map[string]string `json:"daily,omitempty"`
 }
+
+// WeeklyRecord is kept independently of expiring-card maintenance. The latter
+// must not silently use up the once-per-original-week allowance.
+type WeeklyRecord struct {
+	Until time.Time `json:"until,omitempty"`
+	At    time.Time `json:"at,omitempty"`
+	Code  string    `json:"code,omitempty"`
+}
+
+type WeeklyTrigger string
+
+const (
+	WeeklyBeforeCredits   WeeklyTrigger = "before_credits"
+	WeeklyRoutesExhausted WeeklyTrigger = "routes_exhausted"
+)
 
 type ResetIntent struct {
 	Phase           string    `json:"phase"`
@@ -65,26 +84,33 @@ type ResetIntent struct {
 	ExpiresAt       time.Time `json:"expires_at"`
 	PreparedAt      time.Time `json:"prepared_at"`
 	AttemptAt       time.Time `json:"attempt_at,omitempty"`
+	Purpose         string    `json:"purpose,omitempty"`
+	WeekUntil       time.Time `json:"week_until,omitempty"`
 }
 
 type AccountLedger struct {
-	Windows        map[string]WarmWindow `json:"windows"`
-	Warm           *WarmIntent           `json:"warm_intent,omitempty"`
-	Reset          *ResetIntent          `json:"reset_intent,omitempty"`
-	CompletedCards map[string]time.Time  `json:"completed_cards,omitempty"`
-	NextWarmCheck  time.Time             `json:"next_warm_check,omitempty"`
-	NextResetCheck time.Time             `json:"next_reset_check,omitempty"`
-	LastResult     string                `json:"last_result,omitempty"`
+	Windows         map[string]WarmWindow `json:"windows"`
+	Warm            *WarmIntent           `json:"warm_intent,omitempty"`
+	Reset           *ResetIntent          `json:"reset_intent,omitempty"`
+	CompletedCards  map[string]time.Time  `json:"completed_cards,omitempty"`
+	NextWarmCheck   time.Time             `json:"next_warm_check,omitempty"`
+	LastWarmCheck   time.Time             `json:"last_warm_check,omitempty"`
+	NextResetCheck  time.Time             `json:"next_reset_check,omitempty"`
+	NextWeeklyCheck time.Time             `json:"next_weekly_check,omitempty"`
+	Weekly          WeeklyRecord          `json:"weekly,omitempty"`
+	LastResult      string                `json:"last_result,omitempty"`
 }
 
 // Document is one atomic private transaction: policy and execution ledger cannot
 // be committed in different generations. LegacyWarmup retains exact input bytes.
 type Document struct {
-	Version      int                       `json:"version"`
-	Policy       Policy                    `json:"policy"`
-	Ledger       map[string]*AccountLedger `json:"ledger"`
-	ImportDigest string                    `json:"import_digest,omitempty"`
-	LegacyWarmup []byte                    `json:"legacy_warmup,omitempty"`
+	Version          int                       `json:"version"`
+	Policy           Policy                    `json:"policy"`
+	Ledger           map[string]*AccountLedger `json:"ledger"`
+	ImportDigest     string                    `json:"import_digest,omitempty"`
+	LegacyWarmup     []byte                    `json:"legacy_warmup,omitempty"`
+	LegacyAutoReset  []byte                    `json:"legacy_auto_reset,omitempty"`
+	LegacyResetsUsed []byte                    `json:"legacy_resets_used,omitempty"`
 }
 
 type Window struct {
@@ -107,13 +133,17 @@ type ResetCredits struct {
 }
 
 type Snapshot struct {
-	Account     string    `json:"account"`
-	Enabled     bool      `json:"enabled"`
-	Fresh       bool      `json:"fresh"`
-	ObservedAt  time.Time `json:"observed_at"`
-	NoCredits   bool      `json:"no_credits"`
-	UsageKnown  bool      `json:"usage_known"`
-	ModelsKnown bool      `json:"models_known"`
+	Account    string    `json:"account"`
+	Enabled    bool      `json:"enabled"`
+	Fresh      bool      `json:"fresh"`
+	ObservedAt time.Time `json:"observed_at"`
+	NoCredits  bool      `json:"no_credits"`
+	// OnCredits follows the source's CodexGoesOnCredits rule: an explicitly
+	// unlimited account, or has_credits with a positive/unparseable balance.
+	// A missing/failed credits object is never inferred to authorize a spend.
+	OnCredits   bool `json:"on_credits"`
+	UsageKnown  bool `json:"usage_known"`
+	ModelsKnown bool `json:"models_known"`
 	// Held is the trusted host's current account-wide hold. The builtin loader
 	// independently rechecks the model-specific NoCredits guard before sending.
 	Held          bool          `json:"held"`
@@ -124,10 +154,13 @@ type Snapshot struct {
 }
 
 type ConsumeRequest struct {
-	CreditID          string    `json:"credit_id"`
-	RedeemRequestID   string    `json:"redeem_request_id"`
-	ExpectedExpiresAt time.Time `json:"expected_expires_at"`
-	LeadMinutes       int       `json:"lead_minutes"`
+	CreditID          string        `json:"credit_id"`
+	RedeemRequestID   string        `json:"redeem_request_id"`
+	ExpectedExpiresAt time.Time     `json:"expected_expires_at"`
+	LeadMinutes       int           `json:"lead_minutes"`
+	Purpose           string        `json:"purpose,omitempty"`
+	Trigger           WeeklyTrigger `json:"trigger,omitempty"`
+	ExpectedWeekUntil time.Time     `json:"expected_week_until,omitempty"`
 }
 
 type ActionResult struct {

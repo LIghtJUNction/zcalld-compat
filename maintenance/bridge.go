@@ -45,6 +45,14 @@ func (r RPC) Warmup(ctx context.Context, account string, windows []string) (Acti
 }
 func (r RPC) Consume(ctx context.Context, account string, p ConsumeRequest) (ActionResult, error) {
 	var out ActionResult
-	err := r.request(ctx, "maintenance.consume", account, map[string]any{"credit_id": p.CreditID, "redeem_request_id": p.RedeemRequestID, "expected_expires_at": p.ExpectedExpiresAt, "lead_minutes": p.LeadMinutes}, &out)
+	var expires any
+	if !p.ExpectedExpiresAt.IsZero() {
+		expires = p.ExpectedExpiresAt
+	}
+	purpose := p.Purpose
+	if purpose == "" {
+		purpose = "expiring"
+	}
+	err := r.request(ctx, "maintenance.consume", account, map[string]any{"credit_id": p.CreditID, "redeem_request_id": p.RedeemRequestID, "expected_expires_at": expires, "lead_minutes": p.LeadMinutes, "purpose": purpose, "trigger": p.Trigger, "expected_week_until": p.ExpectedWeekUntil}, &out)
 	return out, err
 }

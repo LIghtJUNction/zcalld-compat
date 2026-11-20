@@ -89,6 +89,28 @@ class MaintenanceCLI(unittest.TestCase):
         self.command("invented", ok=False)
         self.command("run-once", "--source", str(self.snapshot), ok=False)
 
+    def test_private_worker_returns_once_with_parent_input_still_open(self):
+        # A real inherited pipe catches a Close/read lifetime that io.Pipe does
+        # not reproduce. The disabled fast path must terminate without waiting
+        # for the native parent to close stdin after it receives the response.
+        process = subprocess.Popen([str(HELPER), "--root", str(self.root), "maintenance", "worker"],
+                                   env=self.env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, text=True)
+        try:
+            process.stdin.write(json.dumps({"id": 7, "method": "weekly", "params": {
+                "account": ACCOUNT, "trigger": "routes_exhausted", "timeout_ms": 5000}}) + "\n")
+            process.stdin.flush()
+            self.assertEqual(process.wait(timeout=3), 0)
+            self.assertEqual(json.loads(process.stdout.read()), {"id": 7, "result": {
+                "status": "not_sent", "code": "weekly_disabled"}})
+            self.assertFalse(self.root.exists())
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=3)
+            for stream in (process.stdin, process.stdout, process.stderr):
+                stream.close()
+
 
 if __name__ == "__main__":
     unittest.main()

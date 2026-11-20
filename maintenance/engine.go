@@ -23,9 +23,9 @@ type Engine struct {
 
 func (e Engine) clock() time.Time {
 	if e.Now != nil {
-		return e.Now().UTC().Round(0)
+		return e.Now().Round(0)
 	}
-	return time.Now().UTC()
+	return time.Now().Round(0)
 }
 
 func (e Engine) Run(ctx context.Context) (Report, error) {
@@ -79,7 +79,7 @@ func (e Engine) Run(ctx context.Context) (Report, error) {
 		if ledger.CompletedCards == nil {
 			ledger.CompletedCards = map[string]time.Time{}
 		}
-		warm := policy.WeeklyWarmup && !now.Before(tx.doc.Policy.EnabledAt.Add(2*time.Minute)) && !now.Before(ledger.NextWarmCheck)
+		warm := !now.Before(tx.doc.Policy.EnabledAt.Add(2*time.Minute)) && warmCheckDue(policy, ledger, now)
 		reset := policy.ExpiringReset && !now.Before(tx.doc.Policy.EnabledAt.Add(3*time.Minute)) && !now.Before(ledger.NextResetCheck)
 		if !warm && !reset {
 			continue
@@ -88,6 +88,7 @@ func (e Engine) Run(ctx context.Context) (Report, error) {
 		now = e.clock() // A completed inspection is timed against receipt, not its start.
 		if readErr != nil || !freshSnapshot(snap, account, now) {
 			if warm {
+				ledger.LastWarmCheck = now
 				ledger.NextWarmCheck = now.Add(time.Minute)
 			}
 			if reset {
@@ -107,6 +108,7 @@ func (e Engine) Run(ctx context.Context) (Report, error) {
 			reset = true
 		}
 		if warm {
+			ledger.LastWarmCheck = now
 			ledger.NextWarmCheck = now.Add(5 * time.Minute)
 		}
 		if reset {
@@ -128,7 +130,7 @@ func (e Engine) Run(ctx context.Context) (Report, error) {
 			} // never combine a reset spend and a generation in one pass
 		}
 		if warm {
-			status, runErr := e.warm(ctx, tx, account, ledger, snap, now)
+			status, runErr := e.warm(ctx, tx, account, policy, ledger, snap, now)
 			if runErr != nil {
 				return result, runErr
 			}
@@ -248,14 +250,18 @@ func reconcileLegacy(l *AccountLedger, windows map[string]Window) bool {
 	}
 	return true
 }
-func (e Engine) warm(ctx context.Context, tx *transaction, account string, l *AccountLedger, s Snapshot, now time.Time) (string, error) {
-	if !s.UsageKnown || !s.ModelsKnown || s.Held {
+func (e Engine) warm(ctx context.Context, tx *transaction, account string, policy AccountPolicy, l *AccountLedger, s Snapshot, now time.Time) (string, error) {
+	if !s.UsageKnown || !s.ModelsKnown || (s.NoCredits && s.Held) {
 		l.LastResult = "quota_or_model_unavailable"
 		return l.LastResult, tx.save()
 	}
 	byName := map[string]Window{}
 	for _, w := range s.Windows {
-		if weekly(w) {
+		if w.SpanSeconds <= 0 || w.Aside || w.Model != "" {
+			continue
+		}
+		short := w.SpanSeconds < 86400
+		if (!short && policy.WeeklyWarmup) || (short && (policy.FiveHourWarmup || len(policy.WarmAts) > 0)) {
 			byName[w.Name] = asNow(w, now)
 		}
 	}
@@ -279,20 +285,60 @@ func (e Engine) warm(ctx context.Context, tx *transaction, account string, l *Ac
 		// A fresh active window is sufficient to avoid another warmup, not proof
 		// that our earlier uncertain request was the one which started it.
 		for _, name := range l.Warm.Windows {
-			l.Windows[name] = observed(byName[name], l.Windows[name])
+			p := observed(byName[name], l.Windows[name])
+			p.Idle = 0
+			p.Retry = time.Time{}
+			if day := l.Warm.Daily[name]; day != "" {
+				p.Daily = day
+			}
+			l.Windows[name] = p
 		}
 		l.Warm = nil
 		l.LastResult = "window_observed_active"
 		return l.LastResult, tx.save()
 	}
 	due := []string{}
+	days := map[string]string{}
+	onReset := map[string]bool{}
+	waitDay := false
 	for name, w := range byName {
 		p, seen := l.Windows[name]
-		if needsWarm(p, seen, w, now) {
-			due = append(due, name)
-		} else {
-			l.Windows[name] = observed(w, p)
+		short := w.SpanSeconds < 86400
+		reset := (policy.FiveHourWarmup || (!short && policy.WeeklyWarmup)) && needsWarm(p, seen, w, now)
+		held := short && heldForClock(policy.WarmAts, w.SpanSeconds, now)
+		day, daily := "", false
+		if short {
+			day, daily = dailyDue(policy.WarmAts, p.Daily, w, now)
 		}
+		if held && !daily {
+			reset = false
+		}
+		if short && idleWindow(w, now) && held && !daily {
+			waitDay = true
+		}
+		if reset || daily {
+			due = append(due, name)
+			onReset[name] = reset
+			if daily {
+				days[name] = day
+			}
+		} else if !held {
+			n := observed(w, p)
+			if !idleWindow(w, now) {
+				n.Idle = 0
+				n.Retry = time.Time{}
+			}
+			l.Windows[name] = n
+		}
+	}
+	if waitDay {
+		kept := due[:0]
+		for _, name := range due {
+			if byName[name].SpanSeconds < 86400 {
+				kept = append(kept, name)
+			}
+		}
+		due = kept
 	}
 	sort.Strings(due)
 	if len(due) == 0 {
@@ -302,7 +348,7 @@ func (e Engine) warm(ctx context.Context, tx *transaction, account string, l *Ac
 	if err := ctx.Err(); err != nil {
 		return "deadline", nil
 	}
-	l.Warm = &WarmIntent{Phase: "prepared", Windows: due, PreparedAt: now}
+	l.Warm = &WarmIntent{Phase: "prepared", Windows: due, PreparedAt: now, Daily: days}
 	if err := tx.save(); err != nil {
 		return "", err
 	}
@@ -321,7 +367,10 @@ func (e Engine) warm(ctx context.Context, tx *transaction, account string, l *Ac
 			n.Warmed = now
 			n.Pending = false
 			n.Failed = 0
-			if idleWindow(byName[name], now) {
+			if day := days[name]; day != "" {
+				n.Daily = day
+			}
+			if onReset[name] && idleWindow(byName[name], now) {
 				n.Idle = p.Idle + 1
 				n.Retry = now.Add(warmRetry(p.Idle))
 			}
@@ -376,10 +425,13 @@ func firstCard(s Snapshot, p AccountPolicy, l *AccountLedger, now time.Time) *Re
 	cards := append([]ResetCard{}, s.Cards...)
 	sort.Slice(cards, func(i, j int) bool {
 		if cards[i].ExpiresAt == nil {
-			return false
+			return cards[j].ExpiresAt == nil && cards[i].ID < cards[j].ID
 		}
 		if cards[j].ExpiresAt == nil {
 			return true
+		}
+		if cards[i].ExpiresAt.Equal(*cards[j].ExpiresAt) {
+			return cards[i].ID < cards[j].ID
 		}
 		return cards[i].ExpiresAt.Before(*cards[j].ExpiresAt)
 	})
@@ -437,6 +489,10 @@ func newRedeemID() (string, error) {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
 }
 func (e Engine) reset(ctx context.Context, tx *transaction, account string, p AccountPolicy, l *AccountLedger, s Snapshot, now time.Time) (bool, string, error) {
+	if l.Reset != nil && l.Reset.Purpose == "week" {
+		l.LastResult = "weekly_reset_pending_review"
+		return true, l.LastResult, tx.save()
+	}
 	candidate := firstCard(s, p, l, now)
 	if l.Reset != nil {
 		// Uncertain work can only revisit its original card and durable request
@@ -483,7 +539,7 @@ func (e Engine) reset(ctx context.Context, tx *transaction, account string, p Ac
 	if err = tx.save(); err != nil {
 		return false, "", err
 	}
-	reply, callErr := e.Host.Consume(ctx, account, ConsumeRequest{l.Reset.CreditID, l.Reset.RedeemRequestID, l.Reset.ExpiresAt, p.ResetLeadMinutes})
+	reply, callErr := e.Host.Consume(ctx, account, ConsumeRequest{CreditID: l.Reset.CreditID, RedeemRequestID: l.Reset.RedeemRequestID, ExpectedExpiresAt: l.Reset.ExpiresAt, LeadMinutes: p.ResetLeadMinutes, Purpose: "expiring"})
 	if callErr == nil && reply.Status == "completed" && reply.Code == "nothing_to_reset" {
 		// The server positively reported no spend. Preserve the card for a
 		// later independently due action, without claiming it was redeemed.

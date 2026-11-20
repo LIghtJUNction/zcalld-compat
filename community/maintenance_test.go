@@ -2,7 +2,9 @@ package community
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -23,7 +25,13 @@ func maintenanceHostFixture(t *testing.T, mode string) (string, maintenance.Stor
 	if _, err := exec.LookPath("bun"); err != nil {
 		t.Skip("real maintenance host fixture requires Bun")
 	}
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = privatefile.Protect(root, 0700); err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range []string{"HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "APPDATA", "LOCALAPPDATA"} {
 		t.Setenv(name, filepath.Join(root, "isolated-home"))
 	}
@@ -31,21 +39,20 @@ func maintenanceHostFixture(t *testing.T, mode string) (string, maintenance.Stor
 	if err != nil {
 		t.Fatal(err)
 	}
-	wrapper := filepath.Join(filepath.Dir(entries["codex.mjs"]), "maintenance-fixture.mjs")
-	script := `import {createCodex} from './codex-impl.mjs';
-import {appendFileSync,readFileSync} from 'node:fs';
-globalThis.fetch=async()=>{throw new Error('UNEXPECTED-NETWORK')};
+	preload := filepath.Join(root, "maintenance-fixture.mjs")
+	script := `import {appendFileSync,readFileSync} from 'node:fs';
+const root=process.env.ZCALLD_MAINTENANCE_FIXTURE_ROOT;
+globalThis.__zcalldMaintenanceFixture=true;
+appendFileSync(root+'/loads','1');
 const reply=value=>new Response(JSON.stringify(value),{headers:{'content-type':'application/json'}});
-export default async(input)=>{
-appendFileSync(input.directory+'/loads','1');
 let usageReads=0;
-return createCodex({fetcher:async(url,init)=>{
+globalThis.fetch=async(url,init={})=>{
  const u=String(url),h=new Headers(init.headers);
  if(h.get('chatgpt-account-id')!=='fixture-only-account')throw new Error('wrong explicit identity');
  if(Object.hasOwn(init,'zcalldAccountPolicy'))throw new Error('policy escaped transport');
  if(u==='https://chatgpt.com/backend-api/wham/usage'){
    usageReads++;
-   const deny=readFileSync(input.directory+'/mode','utf8')==='guard-denies'&&usageReads>=2;
+   const deny=readFileSync(root+'/mode','utf8')==='guard-denies'&&usageReads>=2;
    return reply({rate_limit:{allowed:!deny,limit_reached:deny,
      primary_window:{used_percent:deny?100:20,limit_window_seconds:18000,reset_at:Math.floor(Date.now()/1000)+3600},
      secondary_window:{used_percent:0,limit_window_seconds:604800,reset_at:Math.floor(Date.now()/1000)+604800}},rate_limit_reset_credits:{available_count:0}});
@@ -54,20 +61,34 @@ return createCodex({fetcher:async(url,init)=>{
  if(u==='https://chatgpt.com/backend-api/codex/responses'){
    const b=JSON.parse(init.body);
    if(init.method!=='POST'||b.model!=='fixture-mini'||b.input?.length!==1||b.input[0]?.content?.[0]?.text!=='hi'||b.stream!==true)throw new Error('warmup input changed');
-   appendFileSync(input.directory+'/generated','1');
+   appendFileSync(root+'/generated','1');
    return new Response('event: response.completed\ndata: '+JSON.stringify({type:'response.completed',response:{id:'fixture',object:'response',status:'completed',output:[]}})+'\n\n',{headers:{'content-type':'text/event-stream'}});
  }
- throw new Error('unexpected mock route');
-}});
+ throw new Error('UNEXPECTED-NETWORK');
 };`
-	if err = Atomic(wrapper, []byte(script), 0600); err != nil {
+	if err = Atomic(preload, []byte(script), 0600); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("BUN_OPTIONS", "--preload="+preload)
+	t.Setenv("ZCALLD_MAINTENANCE_FIXTURE_ROOT", root)
+	probe := exec.Command("bun", "-e", "console.log(globalThis.__zcalldMaintenanceFixture===true?'PRELOAD_OK':'PRELOAD_MISSING')")
+	probe.Dir = root
+	if out, e := probe.CombinedOutput(); e != nil || strings.TrimSpace(string(out)) != "PRELOAD_OK" {
+		t.Fatal("closed network preload was not installed", e)
+	}
+	if err = os.Remove(filepath.Join(root, "loads")); err != nil {
+		t.Fatal(err)
+	}
+	entryBytes, err := os.ReadFile(entries["codex.mjs"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	entryHash := sha256.Sum256(entryBytes)
 	if err = Atomic(filepath.Join(root, "mode"), []byte(mode), 0600); err != nil {
 		t.Fatal(err)
 	}
 	var r Registry
-	raw, _ := json.Marshal(map[string]any{"version": 1, "plugins": []any{map[string]any{"name": "builtin-codex", "kind": "community", "source": "builtin-codex", "path": wrapper, "enabled": true}}, "accounts": map[string]any{maintenanceFixtureAccount: map[string]any{"enabled": true}}, "account_policies": map[string]any{maintenanceFixtureAccount: map[string]any{"codex_no_credits": true}}})
+	raw, _ := json.Marshal(map[string]any{"version": 1, "plugins": []any{map[string]any{"name": "builtin-codex", "kind": "community", "source": "builtin-codex", "path": entries["codex.mjs"], "sha256": hex.EncodeToString(entryHash[:]), "enabled": true}}, "accounts": map[string]any{maintenanceFixtureAccount: map[string]any{"enabled": true}}, "account_policies": map[string]any{maintenanceFixtureAccount: map[string]any{"codex_no_credits": true}}})
 	if err = json.Unmarshal(raw, &r); err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +148,7 @@ func TestMaintenanceRealHostUsesNormalLoaderAndDoesNotRepeat(t *testing.T) {
 func TestMaintenanceRealHostRechecksNoCreditsAtGeneration(t *testing.T) {
 	root, _ := maintenanceHostFixture(t, "guard-denies")
 	deadline := time.Now().Add(5 * time.Second)
-	host, err := startHostBudget(root, "builtin-codex", deadline, deadline.Add(time.Second))
+	host, err := startBuiltinCodexHost(root, deadline, deadline.Add(time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +166,7 @@ func TestMaintenanceRealHostRechecksNoCreditsAtGeneration(t *testing.T) {
 func TestMaintenanceRealHostRejectsImplicitAccountAndPolicyInputs(t *testing.T) {
 	root, _ := maintenanceHostFixture(t, "success")
 	deadline := time.Now().Add(5 * time.Second)
-	host, err := startHostBudget(root, "builtin-codex", deadline, deadline.Add(time.Second))
+	host, err := startBuiltinCodexHost(root, deadline, deadline.Add(time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,5 +299,32 @@ func TestMaintenanceDesktopFailureDoesNotFailCompletedAction(t *testing.T) {
 	generated, _ := os.ReadFile(filepath.Join(root, "generated"))
 	if string(generated) != "1" {
 		t.Fatal("expected exactly one synthetic action")
+	}
+}
+
+func TestMaintenanceBeforeCreditsNoCreditsExitsWithoutBun(t *testing.T) {
+	root := t.TempDir()
+	if err := privatefile.Protect(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	r := Registry{Version: 1, Plugins: []Entry{}, Accounts: map[string]AccountMeta{maintenanceFixtureAccount: {Enabled: true}}, AccountPolicies: map[string]json.RawMessage{maintenanceFixtureAccount: json.RawMessage(`{"codex_no_credits":true}`)}}
+	if err := Save(root, r); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := maintenance.PlanImport([]byte(`{"codexAutoReset":["synthetic@example.invalid"],"codexAutoResetOnly":{"synthetic@example.invalid":"week"}}`), nil, []maintenance.AccountLink{{SourceUser: "synthetic@example.invalid", Account: maintenanceFixtureAccount, Enabled: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := maintenance.Store{Directory: filepath.Join(root, "maintenance")}
+	if err = s.ApplyPlan(t.Context(), plan, plan.Hash, true, time.Now().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	result, err := MaintenanceWeekly(t.Context(), root, maintenanceFixtureAccount, maintenance.WeeklyBeforeCredits)
+	if err != nil || result.Status != "not_sent" || result.Code != "no_credits" {
+		t.Fatal(result, err)
+	}
+	if _, err = os.Stat(filepath.Join(root, "runtime")); !os.IsNotExist(err) {
+		t.Fatal("NoCredits fast path started a runtime")
 	}
 }

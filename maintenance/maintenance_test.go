@@ -137,8 +137,8 @@ func TestImportRetainsLedgerAndDoesNotAdoptNewAccounts(t *testing.T) {
 		t.Fatal("mutated plan accepted")
 	}
 }
-func TestUnsupportedSchedulesAndAmbiguousSourceAreRejected(t *testing.T) {
-	for _, cfg := range []string{`{"codexWarmup":"all"}`, `{"codexWarmup":"week","codexWarmAts":["06:00"]}`, `{"codexAutoReset":["test@example.invalid"]}`} {
+func TestInvalidSchedulesAndAmbiguousSourceAreRejected(t *testing.T) {
+	for _, cfg := range []string{`{"codexWarmup":"unknown"}`, `{"codexWarmup":"week","codexWarmAts":["26:00"]}`, `{"codexAutoResetOnly":{"test@example.invalid":"unknown"}}`} {
 		if _, e := PlanImport([]byte(cfg), nil, []AccountLink{{"test@example.invalid", account, true}}); e == nil {
 			t.Fatal("unsupported policy accepted")
 		}
@@ -328,6 +328,53 @@ func TestResetSecondLookCannotSubstituteAnotherCard(t *testing.T) {
 	d, _ := s.Read()
 	if d.Ledger[account].Reset.CreditID != "first" {
 		t.Fatal("original card identity lost")
+	}
+}
+func TestCredentialChangeKeepsOriginalResetIDAndUncertainty(t *testing.T) {
+	for _, uncertain := range []bool{false, true} {
+		t.Run(map[bool]string{false: "prepared", true: "previous-send-unknown"}[uncertain], func(t *testing.T) {
+			s := newStore(t, false, true)
+			now := moment
+			expires := moment.Add(25 * time.Minute)
+			attempts := 0
+			h := &mockHost{inspect: func(context.Context, string) (Snapshot, error) {
+				q := snap(now)
+				q.Windows[0].Used = 40
+				q.Cards = []ResetCard{{"original-card", &expires}}
+				return q, nil
+			}, consume: func(context.Context, string, ConsumeRequest) (ActionResult, error) {
+				attempts++
+				if uncertain && attempts == 1 {
+					return ActionResult{}, errors.New("lost after send")
+				}
+				return ActionResult{Status: "not_sent", Code: "credentials_changed"}, nil
+			}}
+			run(t, s, h, now)
+			original := h.spends[0]
+			if uncertain {
+				now = now.Add(time.Minute)
+				run(t, s, h, now)
+			}
+			d, e := s.Read()
+			if e != nil {
+				t.Fatal(e)
+			}
+			intent := d.Ledger[account].Reset
+			phase := "prepared"
+			if uncertain {
+				phase = "uncertain"
+			}
+			if intent == nil || intent.Phase != phase || intent.CreditID != original.CreditID || intent.RedeemRequestID != original.RedeemRequestID || len(d.Ledger[account].CompletedCards) != 0 {
+				t.Fatal("a no-send credential change discarded authority or prior uncertainty")
+			}
+			now = now.Add(6 * time.Minute)
+			h.consume = nil
+			run(t, s, h, now)
+			retry := h.spends[len(h.spends)-1]
+			if retry.CreditID != original.CreditID || retry.RedeemRequestID != original.RedeemRequestID {
+				t.Fatal("credential restoration authorized a different card or request ID")
+			}
+		})
 	}
 }
 func TestDeadlineIsSharedByTheWholeRun(t *testing.T) {

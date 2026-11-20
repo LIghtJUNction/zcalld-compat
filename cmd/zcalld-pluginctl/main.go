@@ -92,6 +92,9 @@ func run(args []string) error {
 	var err error
 	switch positional[0] {
 	case "maintenance":
+		if len(positional) == 2 && positional[1] == "worker" {
+			return runMaintenanceWorker(root, source, expectedPlan, desktopInbox)
+		}
 		result, err = runMaintenance(root, source, expectedPlan, desktopInbox, positional[1:])
 	case "quota":
 		if len(positional) != 2 {

@@ -1,8 +1,19 @@
 # Optional Codex maintenance
 
-The maintenance command restores two explicitly selected, existing account policies: weekly-window warmup and reset credits approaching expiry. It runs once and exits. Installing the package does not enable either the policy or a scheduler.
+The maintenance command imports explicitly selected policies for already mapped Codex accounts. Scheduled warmup and expiring-card checks run once and exit. Weekly reset is a separate request-path action: a timer never spends a weekly reset credit. Installing the package enables neither the policy nor a scheduler.
 
-This implementation covers the migration shape validated for this project: weekly warmup, no five-hour warmup or daily clock times, and expiring reset credits without weekly reset. An unsupported source policy is rejected during planning. It is not silently widened or approximated. The policy parser is in `maintenance/import.go`.
+| Source setting | Imported behavior |
+| --- | --- |
+| `codexWarmup: off` | No reset-triggered warmup. Explicit clock times remain independent. |
+| `codexWarmup: week` | Warm general quota windows of at least 24 hours after reset. |
+| `codexWarmup: all` | Also warm shorter general windows, including the five-hour window. |
+| `codexWarmAts` / legacy `codexWarmAt` | Local wall-clock starts; normalize and deduplicate times. An explicit empty list disables the old single-clock value. |
+| `codexWarmAtOf` | An account clock replaces the global list; `off` disables that account's clock starts. |
+| `codexAutoResetOnly: week` | Request-triggered weekly reset only. |
+| `codexAutoResetOnly: expiring` | Expiring-card maintenance only. |
+| Account enabled in `codexAutoReset`, no `Only` value | Both reset policies; their ledgers remain separate. |
+
+The policy parser is in `maintenance/import.go`. These meanings follow the pinned reference's [settings](https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/settings/settings.go), [warmup scheduling](https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/provider/warmup_daily.go), and [request-triggered reset](https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/gateway/codex_autoreset.go). Invalid modes or clocks are rejected during planning.
 
 ## Review and import a snapshot
 
@@ -14,7 +25,9 @@ zcalld plugins maintenance plan --source /absolute/private/snapshot
 zcalld plugins maintenance apply --source /absolute/private/snapshot --expect-plan PLAN_HASH
 ```
 
-Replace `PLAN_HASH` with the hash from the immediately preceding plan. The hash binds the canonical snapshot path, all three file hashes, the existing account map, current registry account states, and the derived policy. Apply recomputes it while holding the registry lock. A changed input requires a new plan. Output contains aggregate counts and the plan hash; it does not print login contents. A first import remains disabled. Reapplying the same import preserves the live ledger and an explicitly enabled policy.
+If present, include `codex-autoreset.json` and `codex-resets-used.json` from the same snapshot. The first records the original week's spent-reset guard; the second is its recovery audit. Missing files mean no imported spend. An unreadable or malformed primary cannot silently erase that guard: a valid audit supplies a conservative seven-day guard, and unknown history blocks weekly spending for seven days.
+
+Replace `PLAN_HASH` with the hash from the immediately preceding plan. The hash binds the canonical snapshot path, the required and optional file hashes and presence, the existing account map, current registry account states, and the derived policy. Apply recomputes it while holding the registry lock. A changed input requires a new plan. Output contains aggregate counts and the plan hash; it does not print login contents. A first or changed import remains disabled. Reapplying the same import preserves the live ledger and an explicitly enabled policy. A reviewed policy change retains runtime attempts, daily markers, and the more conservative spent-week guard.
 
 The source warmup ledger is retained byte for byte inside the private state file. Its quota labels are reconciled with current official windows only when their duration identifies one unambiguous window. An old pending attempt is not treated as permission to generate again.
 
@@ -31,9 +44,19 @@ zcalld plugins maintenance disable
 
 `enable` changes only the local policy flag. It does not install a timer, start the gateway, or run maintenance immediately. The engine waits at least two minutes before its first warmup inspection and three minutes before reset inspection. A disabled or not-yet-due invocation does not start Bun. An enabled invocation has one 60-second total budget, including credential cancellation and drain; only the earlier work portion can start requests. A private cross-process lock prevents overlapping runs.
 
-Warmup uses an explicitly imported, currently enabled Codex account. The request uses the normal built-in loader, credential owner checks, and the current NoCredits guard. The prompt and official endpoint are fixed by the adapter. The model must be advertised by the account's model catalog. An unknown quota, missing catalog, held window, or policy rejection prevents generation. Warmup can spend quota; no live warmup is part of the automated test suite.
+Warmup uses an explicitly imported, currently enabled Codex account. The request uses the normal built-in loader, credential owner checks, and the current NoCredits guard. The prompt and official endpoint are fixed by the adapter. The model must be advertised by the account's model catalog. Unknown quota, a missing catalog, or a NoCredits hold prevents generation. Warmup can spend quota; no live warmup is part of the automated test suite.
 
-Reset-credit use is a separate explicit account policy. A fresh inspection must identify the same eligible card twice, including its exact expiry. Before sending, the engine persists a random `redeem_request_id` and card identity. A retry reuses that identifier and card. It cannot switch to another card after an uncertain result. The adapter does not accept caller-supplied URLs, prompts, models, or policy overrides.
+A clock start runs at most once for its local date and time. A start missed by no more than one hour can run when the machine resumes; older starts are skipped. A short-window reset warmup is held if it would run across the next requested clock. The corresponding weekly warmup is also held because the same generation would activate both windows. Old whole-date ledger entries still suppress that day's clock starts. A completed warmup whose window remains idle uses the original 15-minute to four-hour backoff.
+
+Reset-credit use is a separate explicit account policy. A fresh inspection must identify the same eligible card twice, including its exact expiry when one exists. Before sending, the engine persists a random `redeem_request_id` and card identity. A retry reuses that identifier and card. It cannot switch to another card after an uncertain result. Immediately before POST, the adapter re-reads the current credential owner, native source file, account, and access-token identity. Any change yields `not_sent`; it does not spend with a stale authorization snapshot. The adapter does not accept caller-supplied URLs, prompts, models, or policy overrides.
+
+### Weekly request-path trigger
+
+Only the native gateway's trusted request path may launch `maintenance worker`. `before_credits` requires NoCredits to be off, a fresh full weekly window with a known future reset, and the reference's `CodexGoesOnCredits` condition: explicit unlimited credits, or `has_credits` with a positive or unparseable balance. Missing usage is not evidence. NoCredits-enabled accounts continue through alternatives first. `routes_exhausted` is allowed only after the native router has exhausted those alternatives; the worker still revalidates the account policy, full window, original week, and card.
+
+The worker uses the same private process lock and durable reset ledger as the timer. It starts no Bun host when the local policy is off, the original week is already recorded, or a NoCredits account reaches the before-credits fast path. Only `completed` with code `reset` tells routing to retry. A duplicate-redemption acknowledgement or unknown outcome does not create a new reset or authorize that retry. The timer never invokes either weekly trigger.
+
+Its private stdin protocol accepts one bounded `weekly` request, followed only by cancellation. Native `abort` or EOF cancels the same context used by the verified builtin Host. Abort, stdin close, and credential drain share one deadline; they do not grant a fresh operation budget. This protocol is not an HTTP management route and has no caller-controlled endpoint or prompt.
 
 ## Failure and restart behavior
 
@@ -52,7 +75,7 @@ Do not remove a pending ledger entry merely to make an action retry. Its purpose
 
 ## Optional schedulers
 
-The package provides templates. None is enabled by package installation. Scheduler activation is an independent deployment action after a reviewed plan has been applied and the policy explicitly enabled.
+Arch packages and Linux native archives install the service and timer under `/usr/lib/systemd/user/`. All native archives and the Arch package also carry this guide under `share/doc/zcalld-compat/docs/`, plus the macOS and Windows templates under `share/doc/zcalld-compat/packaging/`. Unix archives place that shared directory beneath `usr/`; the Windows ZIP places it at the archive root. None of these schedulers is enabled by package installation. Scheduler activation is an independent deployment action after a reviewed plan has been applied and the policy explicitly enabled.
 
 ### Linux
 
@@ -91,4 +114,6 @@ Events use an opaque account-derived digest. They contain no account names, acce
 
 ## Validation boundary
 
-The tests use temporary homes, synthetic import snapshots, mock upstream responses, and controlled clocks. They cover changed-plan rejection, duplicate-run locking, imported pending state, crash recovery, same-ID consume retries, no-spend results, bounded host deadlines, NoCredits routing, and local-only disabled/status paths. They do not exercise a live generation, refresh another application's credentials, or consume a real reset credit. A successful test establishes the tested state transition; it does not prove an external service will accept a future account request.
+The tests use temporary homes, synthetic import snapshots, mock upstream responses, and controlled clocks. They cover changed-plan rejection, duplicate-run locking, imported pending state, crash recovery, same-ID consume retries, no-spend results, clock catchup, weekly versus timer authority, native abort/EOF, bounded host drain, NoCredits routing, and local-only disabled/status paths. They do not exercise a live generation, refresh another application's credentials, or consume a real reset credit. A successful test establishes the tested state transition; it does not prove an external service will accept a future account request.
+
+This module provides Codex maintenance. The pinned reference's Claude warmup uses a different send path and extra-usage guard; those require a separately verified provider hook. It is not implemented by substituting Claude accounts into the Codex URLs or reset-card schema.

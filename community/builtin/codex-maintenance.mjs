@@ -1,7 +1,7 @@
 // Optional one-shot maintenance. URLs, prompt and account selection are not RPC
 // inputs. The trusted host supplies the existing fetchAs path for generation.
 import { object, secret, expiry, fetchSafe } from './common.mjs'
-import { codexQuotaWindows } from './codex-credits.mjs'
+import { codexQuotaIdentity, codexQuotaWindows } from './codex-credits.mjs'
 
 const ORIGIN = 'https://chatgpt.com'
 const PATHS = Object.freeze({
@@ -101,6 +101,33 @@ function eligible(snapshot, card, lead, nowMs) {
   return windows.some(w => w.used >= 100 && !w.model && (!w.resets_at || Date.parse(w.resets_at) >= threshold))
 }
 
+function onCredits(usage) {
+  const credits = usage?.credits
+  if (!credits || typeof credits !== 'object' || Array.isArray(credits)) return false
+  if (credits.unlimited === true) return true
+  if (credits.has_credits !== true) return false
+  if (credits.balance === undefined || credits.balance === null) return true
+  if (typeof credits.balance !== 'string') return false
+  const value = credits.balance.trim()
+  if (!value) return true
+  if (/^nan$/iu.test(value)) return false
+  if (/^\+?(?:inf|infinity)$/iu.test(value)) return true
+  if (/^-(?:inf|infinity)$/iu.test(value)) return false
+  const number = Number(value)
+  // The source's CodexGoesOnCredits treats a balance it cannot parse as
+  // available when has_credits is explicit; a numeric zero/debt is not.
+  return Number.isNaN(number) || number > 0
+}
+
+function weeklyEnd(snapshot, trigger, nowMs) {
+  if (!snapshot.usage_known ||
+      !['before_credits', 'routes_exhausted'].includes(trigger) ||
+      (trigger === 'before_credits' && (snapshot.no_credits || !snapshot.on_credits))) return null
+  const ends = snapshot.windows.filter(w => !w.aside && !w.model && w.span_seconds >= 86400 &&
+    w.used >= 100 && w.resets_at && Date.parse(w.resets_at) > nowMs).map(w => Date.parse(w.resets_at))
+  return ends.length ? new Date(Math.max(...ends)).toISOString() : null
+}
+
 export function createCodexMaintenance({ fetcher, externalAuth, accountID, clientHeaders, now = Date.now }) {
   return async function maintenance(stored, request, trusted) {
     object(request)
@@ -114,12 +141,15 @@ export function createCodexMaintenance({ fetcher, externalAuth, accountID, clien
     const signal = AbortSignal.any(signals)
     if (signal.aborted) throw abort(signal)
     let auth = object(stored)
+    const ownership = value => JSON.stringify([value.type, value.refreshOwner ?? null, value.sourceAuthFile ?? null])
+    const initialOwnership = ownership(auth)
     trusted.assertCurrent()
     if (auth.type !== 'oauth' || !['external', 'host', undefined].includes(auth.refreshOwner)) throw failure()
     if (auth.refreshOwner === 'external') auth = await bounded(externalAuth(auth, now()), signal)
     const expires = expiry(auth.access, 0, now()) || Number(auth.expires)
     if (!Number.isFinite(expires) || expires <= now()) throw failure()
     const actualAccount = secret(accountID(auth), 'bound Codex account')
+    const initialIdentity = codexQuotaIdentity(auth, actualAccount)
     const headers = new Headers({ accept: 'application/json', authorization: `Bearer ${secret(auth.access, 'Codex access token')}`,
       'chatgpt-account-id': actualAccount })
     clientHeaders(headers, '0.170.0')
@@ -149,7 +179,7 @@ export function createCodexMaintenance({ fetcher, externalAuth, accountID, clien
       }
       const snapshot = {
         account: request.account, enabled: true, fresh: true, observed_at: new Date(now()).toISOString(),
-        no_credits: trusted.noCredits === true, usage_known: parsed.known, models_known: !!model,
+        no_credits: trusted.noCredits === true, on_credits: onCredits(usage), usage_known: parsed.known, models_known: !!model,
         held: parsed.held, windows: parsed.windows.map(w => ({ ...w, resets_at: iso(w.resets_at) })),
         cards_complete: cards !== null, reset_cards: cards || [],
         ...(resetCredits ? { reset_credits: resetCredits } : {}),
@@ -161,8 +191,8 @@ export function createCodexMaintenance({ fetcher, externalAuth, accountID, clien
       if (!Array.isArray(request.windows) || !request.windows.length || request.windows.length > 2 ||
           request.windows.some(n => !['primary', 'secondary'].includes(n)) || typeof trusted.generation !== 'function') throw failure()
       const { snapshot, model } = await inspect()
-      if (!snapshot.usage_known || snapshot.held || !model || signal.aborted) return { status: 'not_sent', code: 'unavailable' }
-      if (request.windows.some(name => !snapshot.windows.some(w => w.name === name && w.span_seconds >= 86400 && !w.aside && !w.model)))
+      if (!snapshot.usage_known || (snapshot.no_credits && snapshot.held) || !model || signal.aborted) return { status: 'not_sent', code: 'unavailable' }
+      if (request.windows.some(name => !snapshot.windows.some(w => w.name === name && w.span_seconds > 0 && !w.aside && !w.model)))
         return { status: 'not_sent', code: 'window_changed' }
       trusted.assertCurrent()
       const input = { model: model.name, input: 'hi', stream: true, ...(model.effort ? { reasoning: { effort: model.effort } } : {}) }
@@ -190,15 +220,42 @@ export function createCodexMaintenance({ fetcher, externalAuth, accountID, clien
         !UUID.test(request.redeem_request_id || '') || !Number.isInteger(request.lead_minutes) ||
         request.lead_minutes < 3 || request.lead_minutes > 1440) throw failure()
     const expected = expiryDate(request.expected_expires_at)
-    if (!expected) throw failure()
+    const purpose = request.purpose ?? 'expiring'
+    if (!['week', 'expiring'].includes(purpose) || (purpose === 'expiring' && !expected)) throw failure()
+    const expectedWeek = purpose === 'week' ? expiryDate(request.expected_week_until) : null
+    if (purpose === 'week' && (!expectedWeek || !['before_credits', 'routes_exhausted'].includes(request.trigger))) throw failure()
     // A final fresh check at the actual send boundary is in addition to the
     // Go engine's second look. Never exchange another card or request ID here.
     const { snapshot } = await inspect()
-    const candidates = snapshot.reset_cards.filter(c => c.expires_at && Date.parse(c.expires_at) > now()).sort((a, b) => a.expires_at.localeCompare(b.expires_at))
+    const candidates = snapshot.reset_cards.filter(c => c.expires_at ? Date.parse(c.expires_at) > now() : purpose === 'week').sort((a, b) => {
+      if (!a.expires_at && b.expires_at) return 1
+      if (a.expires_at && !b.expires_at) return -1
+      if (a.expires_at !== b.expires_at) return a.expires_at.localeCompare(b.expires_at)
+      return Buffer.compare(Buffer.from(a.id), Buffer.from(b.id))
+    })
     const card = candidates[0]
-    if (!card || card.id !== request.credit_id || card.expires_at !== expected || !eligible(snapshot, card, request.lead_minutes, now()) || signal.aborted)
+    const due = purpose === 'week' ? weeklyEnd(snapshot, request.trigger, now()) === expectedWeek
+      : eligible(snapshot, card, request.lead_minutes, now())
+    if (!card || card.id !== request.credit_id || card.expires_at !== expected || !due || signal.aborted)
       return { status: 'not_sent', code: 'card_changed' }
-    trusted.assertCurrent()
+    // Inspection can overlap a native sign-in change, access-token renewal or
+    // an explicit credential-owner handoff. Re-read local authority at the last
+    // boundary before spending this exact card; never fall back to the copy
+    // captured before the usage/cards requests.
+    try {
+      trusted.assertCurrent()
+      if (typeof trusted.readAuth !== 'function') throw failure()
+      const latestStored = object(await bounded(Promise.resolve().then(() => trusted.readAuth()), signal))
+      if (ownership(latestStored) !== initialOwnership) throw failure()
+      const latest = latestStored.refreshOwner === 'external'
+        ? await bounded(externalAuth(latestStored, now()), signal) : latestStored
+      const latestAccount = secret(accountID(latest), 'bound Codex account')
+      const latestExpires = expiry(latest.access, 0, now()) || Number(latest.expires)
+      if (!Number.isFinite(latestExpires) || latestExpires <= now() ||
+          codexQuotaIdentity(latest, latestAccount) !== initialIdentity) throw failure()
+      trusted.assertCurrent()
+      if (signal.aborted) throw abort(signal)
+    } catch { return { status: 'not_sent', code: 'credentials_changed' } }
     let response
     try {
       const postHeaders = new Headers(headers); postHeaders.set('content-type', 'application/json')

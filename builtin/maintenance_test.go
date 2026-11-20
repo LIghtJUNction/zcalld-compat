@@ -90,7 +90,7 @@ func TestMaintenanceSnapshotPlanBindsFilesAndDoesNotCopyCredentials(t *testing.T
 	}
 }
 func TestMaintenanceChangedSnapshotOrEnabledStateInvalidatesPlan(t *testing.T) {
-	for _, which := range []string{"settings", "ledger", "login", "mapping", "enabled"} {
+	for _, which := range []string{"settings", "ledger", "login", "mapping", "enabled", "weekly-ledger", "reset-audit"} {
 		t.Run(which, func(t *testing.T) {
 			root, snapshot := maintenanceFixture(t)
 			p, err := MaintenancePlan(root, snapshot, "", false)
@@ -98,6 +98,15 @@ func TestMaintenanceChangedSnapshotOrEnabledStateInvalidatesPlan(t *testing.T) {
 				t.Fatal(err)
 			}
 			switch which {
+			case "weekly-ledger", "reset-audit":
+				name := map[string]string{"weekly-ledger": "codex-autoreset.json", "reset-audit": "codex-resets-used.json"}[which]
+				data := "{}"
+				if which == "reset-audit" {
+					data = "[]"
+				}
+				if err := os.WriteFile(filepath.Join(snapshot, name), []byte(data), 0600); err != nil {
+					t.Fatal(err)
+				}
 			case "enabled":
 				r, _ := community.Read(root)
 				meta := r.Accounts[maintenanceAccount]

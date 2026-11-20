@@ -21,16 +21,21 @@ type AccountLink struct {
 }
 
 type ImportPlan struct {
-	Accounts         map[string]AccountPolicy         `json:"accounts"`
-	Windows          map[string]map[string]WarmWindow `json:"windows"`
-	LegacyWarmup     []byte                           `json:"legacy_warmup"`
-	SourceDigest     string                           `json:"source_digest"`
-	UnmappedAccounts int                              `json:"unmapped_accounts"`
-	Hash             string                           `json:"hash"`
+	Accounts             map[string]AccountPolicy         `json:"accounts"`
+	Windows              map[string]map[string]WarmWindow `json:"windows"`
+	LegacyWarmup         []byte                           `json:"legacy_warmup"`
+	LegacyAutoReset      []byte                           `json:"legacy_auto_reset,omitempty"`
+	LegacyResetsUsed     []byte                           `json:"legacy_resets_used,omitempty"`
+	WeeklyRecords        map[string]WeeklyRecord          `json:"weekly_records,omitempty"`
+	WeeklyHistoryUnknown bool                             `json:"weekly_history_unknown,omitempty"`
+	SourceDigest         string                           `json:"source_digest"`
+	UnmappedAccounts     int                              `json:"unmapped_accounts"`
+	Hash                 string                           `json:"hash"`
 }
 
 type legacySettings struct {
 	Warmup        string            `json:"codexWarmup"`
+	WarmAt        string            `json:"codexWarmAt"`
 	WarmAts       []string          `json:"codexWarmAts"`
 	WarmAtOf      map[string]string `json:"codexWarmAtOf"`
 	AutoReset     []string          `json:"codexAutoReset"`
@@ -45,27 +50,48 @@ func planHash(p ImportPlan) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// PlanImport is local-only. Unsupported five-hour/daily/weekly-reset schedules
-// fail explicitly; they are never silently broadened or enabled.
+// PlanImport is local-only and imports no credentials or accounts. The extended
+// form additionally preserves the source's once-per-week redemption history.
 func PlanImport(settings, warmup []byte, links []AccountLink) (ImportPlan, error) {
-	p := ImportPlan{Accounts: map[string]AccountPolicy{}, Windows: map[string]map[string]WarmWindow{}, LegacyWarmup: append([]byte{}, warmup...)}
-	if len(settings) > 2<<20 || len(warmup) > 2<<20 || len(links) > MaxAccounts {
+	return PlanImportLedgers(settings, warmup, nil, nil, links)
+}
+func PlanImportLedgers(settings, warmup, autoReset, resetsUsed []byte, links []AccountLink) (ImportPlan, error) {
+	p := ImportPlan{Accounts: map[string]AccountPolicy{}, Windows: map[string]map[string]WarmWindow{}, WeeklyRecords: map[string]WeeklyRecord{}, LegacyWarmup: append([]byte{}, warmup...), LegacyAutoReset: append([]byte{}, autoReset...), LegacyResetsUsed: append([]byte{}, resetsUsed...)}
+	if len(settings) > 2<<20 || len(warmup)+len(autoReset)+len(resetsUsed) > 2<<20 || len(links) > MaxAccounts {
 		return p, ErrInvalid
 	}
 	var s legacySettings
 	if json.Unmarshal(settings, &s) != nil {
 		return p, ErrInvalid
 	}
-	if s.Warmup != "" && s.Warmup != "off" && s.Warmup != "week" {
-		return p, errors.New("only the verified weekly warmup policy can be imported")
+	if s.Warmup != "" && s.Warmup != "off" && s.Warmup != "week" && s.Warmup != "all" {
+		return p, ErrInvalid
 	}
-	if len(s.WarmAts) > 0 {
-		return p, errors.New("scheduled warmup times are not supported by this maintenance module")
+	if s.WarmAts == nil && strings.TrimSpace(s.WarmAt) != "" {
+		s.WarmAts = []string{s.WarmAt}
 	}
-	for _, at := range s.WarmAtOf {
-		if at != "" && at != "off" {
-			return p, errors.New("per-account warmup times are not supported")
+	clocks, err := normalizedClocks(s.WarmAts)
+	if err != nil {
+		return p, err
+	}
+	ownClocks := map[string][]string{}
+	for user, value := range s.WarmAtOf {
+		user = strings.ToLower(strings.TrimSpace(user))
+		value = strings.ToLower(strings.TrimSpace(value))
+		if user == "" || value == "" {
+			continue
 		}
+		at := []string{}
+		if value != "off" {
+			at, err = normalizedClocks([]string{value})
+			if err != nil {
+				return p, err
+			}
+		}
+		if previous, ok := ownClocks[user]; ok && strings.Join(previous, ",") != strings.Join(at, ",") {
+			return p, ErrInvalid
+		}
+		ownClocks[user] = at
 	}
 	lead := s.ResetLead
 	if lead < 3 || lead > 1440 {
@@ -101,13 +127,28 @@ func PlanImport(settings, warmup []byte, links []AccountLink) (ImportPlan, error
 	for _, user := range s.AutoReset {
 		resetUsers[strings.ToLower(strings.TrimSpace(user))] = true
 	}
+	resetOnly := map[string]string{}
+	for user, value := range s.AutoResetOnly {
+		user = strings.ToLower(strings.TrimSpace(user))
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "" && value != "week" && value != "expiring" {
+			return p, ErrInvalid
+		}
+		if previous, ok := resetOnly[user]; ok && previous != value {
+			return p, ErrInvalid
+		}
+		resetOnly[user] = value
+	}
+	history, unknown := weeklyImportHistory(autoReset, resetsUsed)
+	p.WeeklyHistoryUnknown = unknown
 	for user, account := range enabled {
 		reset := resetUsers[user]
-		if reset && s.AutoResetOnly[user] != "expiring" {
-			return p, errors.New("only the verified expiring-reset policy can be imported")
+		ats := clocks
+		if own, ok := ownClocks[user]; ok {
+			ats = own
 		}
-		policy := AccountPolicy{WeeklyWarmup: s.Warmup == "week", ExpiringReset: reset, ResetLeadMinutes: lead}
-		if !policy.WeeklyWarmup && !policy.ExpiringReset {
+		policy := AccountPolicy{WeeklyWarmup: s.Warmup == "week" || s.Warmup == "all", FiveHourWarmup: s.Warmup == "all", WarmAts: append([]string{}, ats...), WeeklyReset: reset && resetOnly[user] != "expiring", ExpiringReset: reset && resetOnly[user] != "week", ResetLeadMinutes: lead}
+		if !warmPolicyEnabled(policy) && !policy.ExpiringReset && !policy.WeeklyReset {
 			continue
 		}
 		p.Accounts[account] = policy
@@ -116,16 +157,35 @@ func PlanImport(settings, warmup []byte, links []AccountLink) (ImportPlan, error
 			ws = map[string]WarmWindow{}
 		}
 		p.Windows[account] = ws
-	}
-	for user := range resetUsers {
-		if _, ok := enabled[user]; !ok {
-			p.UnmappedAccounts++
+		if policy.WeeklyReset {
+			record := history[user]
+			if global := history["*"]; global.Until.After(record.Until) {
+				record = global
+			}
+			p.WeeklyRecords[account] = record
 		}
 	}
+	unmapped := map[string]bool{}
+	for user := range resetUsers {
+		if user != "" {
+			if _, ok := enabled[user]; !ok {
+				unmapped[user] = true
+			}
+		}
+	}
+	for user, ats := range ownClocks {
+		if len(ats) > 0 {
+			if _, ok := enabled[user]; !ok {
+				unmapped[user] = true
+			}
+		}
+	}
+	p.UnmappedAccounts = len(unmapped)
 	hash := sha256.New()
-	hash.Write(settings)
-	hash.Write([]byte{0})
-	hash.Write(warmup)
+	for _, raw := range [][]byte{settings, warmup, autoReset, resetsUsed} {
+		hash.Write(raw)
+		hash.Write([]byte{0})
+	}
 	p.SourceDigest = hex.EncodeToString(hash.Sum(nil))
 	p.Hash = planHash(p)
 	return p, nil
@@ -147,7 +207,31 @@ func (s Store) ApplyPlan(ctx context.Context, p ImportPlan, expect string, enabl
 	defer tx.close()
 	if tx.doc.ImportDigest != "" {
 		if tx.doc.ImportDigest != p.Hash {
-			return ErrConfigured
+			// A changed, explicitly reviewed snapshot updates only policy.
+			// Never replace live attempts, daily markers or a spent-week guard
+			// with an older snapshot. Removed policy keys keep their ledger.
+			for account := range p.Accounts {
+				if tx.doc.Ledger[account] == nil {
+					tx.doc.Ledger[account] = importedLedger(p, account, now)
+				}
+				l := tx.doc.Ledger[account]
+				if p.Accounts[account].WeeklyReset {
+					record := p.WeeklyRecords[account]
+					if p.WeeklyHistoryUnknown {
+						record = WeeklyRecord{Until: now.Add(7 * 24 * time.Hour), At: now, Code: "history_unknown"}
+					}
+					if record.Until.After(l.Weekly.Until) {
+						l.Weekly = record
+					}
+				}
+			}
+			tx.doc.Policy.Accounts = p.Accounts
+			tx.doc.Policy.Enabled = enable
+			if enable {
+				tx.doc.Policy.EnabledAt = now.UTC()
+			}
+			tx.doc.ImportDigest = p.Hash
+			return tx.save()
 		}
 		if tx.doc.Policy.Enabled != enable {
 			tx.doc.Policy.Enabled = enable
@@ -166,32 +250,51 @@ func (s Store) ApplyPlan(ctx context.Context, p ImportPlan, expect string, enabl
 	}
 	tx.doc.ImportDigest = p.Hash
 	tx.doc.LegacyWarmup = append([]byte{}, p.LegacyWarmup...)
-	for account, windows := range p.Windows {
-		l := &AccountLedger{Windows: windows, CompletedCards: map[string]time.Time{}}
-		ambiguous := []string{}
-		for name, w := range windows {
-			if w.Pending || (w.Failed > 0 && w.Warmed.IsZero()) {
-				ambiguous = append(ambiguous, name)
-			}
-		}
-		if len(ambiguous) > 0 {
-			sort.Strings(ambiguous)
-			l.Warm = &WarmIntent{Phase: "uncertain", Windows: ambiguous, PreparedAt: now.UTC()}
-			l.LastResult = "imported_warmup_outcome_unknown"
-		}
-		tx.doc.Ledger[account] = l
+	tx.doc.LegacyAutoReset = append([]byte{}, p.LegacyAutoReset...)
+	tx.doc.LegacyResetsUsed = append([]byte{}, p.LegacyResetsUsed...)
+	for account := range p.Accounts {
+		tx.doc.Ledger[account] = importedLedger(p, account, now)
 	}
 	return tx.save()
 }
 
+func importedLedger(p ImportPlan, account string, now time.Time) *AccountLedger {
+	windows := p.Windows[account]
+	if windows == nil {
+		windows = map[string]WarmWindow{}
+	}
+	l := &AccountLedger{Windows: windows, CompletedCards: map[string]time.Time{}}
+	if p.Accounts[account].WeeklyReset {
+		l.Weekly = p.WeeklyRecords[account]
+		if p.WeeklyHistoryUnknown {
+			l.Weekly = WeeklyRecord{Until: now.Add(7 * 24 * time.Hour), At: now, Code: "history_unknown"}
+		}
+	}
+	ambiguous := []string{}
+	for name, w := range windows {
+		if w.Pending || (w.Failed > 0 && w.Warmed.IsZero()) {
+			ambiguous = append(ambiguous, name)
+		}
+	}
+	if len(ambiguous) > 0 {
+		sort.Strings(ambiguous)
+		l.Warm = &WarmIntent{Phase: "uncertain", Windows: ambiguous, PreparedAt: now.UTC()}
+		l.LastResult = "imported_warmup_outcome_unknown"
+	}
+	return l
+}
+
 type Status struct {
-	Enabled       bool `json:"enabled"`
-	Accounts      int  `json:"accounts"`
-	WeeklyWarmup  int  `json:"weekly_warmup"`
-	ExpiringReset int  `json:"expiring_reset"`
-	PendingWarmup int  `json:"pending_warmup"`
-	PendingReset  int  `json:"pending_reset"`
-	LocalOnly     bool `json:"local_only"`
+	Enabled         bool `json:"enabled"`
+	Accounts        int  `json:"accounts"`
+	WeeklyWarmup    int  `json:"weekly_warmup"`
+	FiveHourWarmup  int  `json:"five_hour_warmup"`
+	ScheduledWarmup int  `json:"scheduled_warmup"`
+	WeeklyReset     int  `json:"weekly_reset"`
+	ExpiringReset   int  `json:"expiring_reset"`
+	PendingWarmup   int  `json:"pending_warmup"`
+	PendingReset    int  `json:"pending_reset"`
+	LocalOnly       bool `json:"local_only"`
 }
 
 func (s Store) Status() (Status, error) {
@@ -203,6 +306,15 @@ func (s Store) Status() (Status, error) {
 	for _, p := range d.Policy.Accounts {
 		if p.WeeklyWarmup {
 			out.WeeklyWarmup++
+		}
+		if p.FiveHourWarmup {
+			out.FiveHourWarmup++
+		}
+		if len(p.WarmAts) > 0 {
+			out.ScheduledWarmup++
+		}
+		if p.WeeklyReset {
+			out.WeeklyReset++
 		}
 		if p.ExpiringReset {
 			out.ExpiringReset++

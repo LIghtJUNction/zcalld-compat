@@ -14,13 +14,57 @@ import (
 // MaintenanceRun starts no Bun process for disabled/not-due state. The single
 // total deadline includes the existing credential checkpoint/drain allowance.
 func MaintenanceRun(ctx context.Context, root, inbox string) (maintenance.Report, error) {
+	engine, close := maintenanceEngine(root, inbox)
+	defer close()
+	return engine.Run(ctx)
+}
+
+// MaintenanceWeekly is called only by the private native request-path worker.
+// The state/NoCredits fast paths are local. Authority is rechecked again in the
+// verified builtin host immediately before any eventual remote action.
+func MaintenanceWeekly(ctx context.Context, root, account string, trigger maintenance.WeeklyTrigger) (maintenance.ActionResult, error) {
+	store := maintenance.Store{Directory: filepath.Join(root, "maintenance")}
+	state, err := store.Read()
+	if err != nil {
+		return maintenance.ActionResult{Status: "not_sent", Code: "state_unavailable"}, err
+	}
+	if !state.Policy.Enabled || !state.Policy.Accounts[account].WeeklyReset {
+		return maintenance.ActionResult{Status: "not_sent", Code: "weekly_disabled"}, nil
+	}
+	registry, err := Read(root)
+	if err != nil {
+		return maintenance.ActionResult{Status: "not_sent", Code: "account_unavailable"}, err
+	}
+	meta, ok := registry.Accounts[account]
+	if !ok || !meta.Enabled {
+		return maintenance.ActionResult{Status: "not_sent", Code: "account_unavailable"}, nil
+	}
+	if trigger == maintenance.WeeklyBeforeCredits {
+		if raw, ok := registry.AccountPolicies[account]; ok {
+			var policy struct {
+				NoCredits bool `json:"codex_no_credits"`
+			}
+			if json.Unmarshal(raw, &policy) != nil {
+				return maintenance.ActionResult{Status: "not_sent", Code: "policy_unavailable"}, errors.New("invalid current account policy")
+			}
+			if policy.NoCredits {
+				return maintenance.ActionResult{Status: "not_sent", Code: "no_credits"}, nil
+			}
+		}
+	}
+	engine, close := maintenanceEngine(root, "")
+	defer close()
+	return engine.RunWeekly(ctx, account, trigger)
+}
+
+func maintenanceEngine(root, inbox string) (maintenance.Engine, func()) {
 	store := maintenance.Store{Directory: filepath.Join(root, "maintenance")}
 	var host *Host
-	defer func() {
+	close := func() {
 		if host != nil {
 			host.Close()
 		}
-	}()
+	}
 	call := func(ctx context.Context, method string, params map[string]any) (json.RawMessage, error) {
 		if method != "maintenance.inspect" && method != "maintenance.warmup" && method != "maintenance.consume" {
 			return nil, errors.New("invalid maintenance operation")
@@ -35,9 +79,7 @@ func MaintenanceRun(ctx context.Context, root, inbox string) (maintenance.Report
 		}
 		if host == nil {
 			var err error
-			// Registry plugin sources use the importer entry name. The colon
-			// form is reserved for the authentication provider/account key.
-			host, err = startHostBudget(root, "builtin-codex", operation, total)
+			host, err = startBuiltinCodexHostContext(ctx, root, operation, total)
 			if err != nil {
 				return nil, err
 			}
@@ -47,7 +89,11 @@ func MaintenanceRun(ctx context.Context, root, inbox string) (maintenance.Report
 		host.drainDeadline = total
 		params["deadline_ms"] = operation.UnixMilli()
 		var raw json.RawMessage
-		if err := host.callUntil(method, params, &raw, operation); err != nil {
+		if err := host.callUntilContext(ctx, method, params, &raw, operation); err != nil {
+			// Keep Engine's private ledger lock until the owned host finishes
+			// its credential drain. A cancelled caller cannot overlap the
+			// next reset with an old host's final credential checkpoint.
+			host.Close()
 			return nil, err
 		}
 		if len(raw) > 64<<10 {
@@ -55,7 +101,7 @@ func MaintenanceRun(ctx context.Context, root, inbox string) (maintenance.Report
 		}
 		return raw, nil
 	}
-	return (maintenance.Engine{Store: store, Host: maintenance.RPC{Call: call}, Observe: maintenanceObserver(root, inbox)}).Run(ctx)
+	return maintenance.Engine{Store: store, Host: maintenance.RPC{Call: call}, Observe: maintenanceObserver(root, inbox)}, close
 }
 
 // Re-read the host-owned settings for each already-needed observation. A CLI

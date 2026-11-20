@@ -29,7 +29,7 @@ type transaction struct {
 }
 
 func validateDocument(d Document) error {
-	if d.Version != SchemaVersion || d.Policy.Accounts == nil || d.Ledger == nil || len(d.Policy.Accounts) > MaxAccounts || len(d.Ledger) > MaxAccounts || len(d.LegacyWarmup) > 2<<20 {
+	if d.Version != SchemaVersion || d.Policy.Accounts == nil || d.Ledger == nil || len(d.Policy.Accounts) > MaxAccounts || len(d.Ledger) > MaxAccounts || len(d.LegacyWarmup)+len(d.LegacyAutoReset)+len(d.LegacyResetsUsed) > 2<<20 {
 		return ErrInvalid
 	}
 	if d.Policy.Enabled && d.Policy.EnabledAt.IsZero() {
@@ -38,6 +38,18 @@ func validateDocument(d Document) error {
 	for account, p := range d.Policy.Accounts {
 		if !accountPattern.MatchString(account) || p.ResetLeadMinutes < 3 || p.ResetLeadMinutes > 1440 {
 			return ErrInvalid
+		}
+		if p.FiveHourWarmup && !p.WeeklyWarmup {
+			return ErrInvalid
+		}
+		clocks, err := normalizedClocks(p.WarmAts)
+		if err != nil || len(clocks) != len(p.WarmAts) {
+			return ErrInvalid
+		}
+		for i := range clocks {
+			if clocks[i] != p.WarmAts[i] {
+				return ErrInvalid
+			}
 		}
 	}
 	for account, l := range d.Ledger {
@@ -53,9 +65,31 @@ func validateDocument(d Document) error {
 			if (p.Phase != "prepared" && p.Phase != "sending" && p.Phase != "uncertain") || len(p.Windows) == 0 || len(p.Windows) > 64 || p.PreparedAt.IsZero() {
 				return ErrInvalid
 			}
+			if len(p.Daily) > len(p.Windows) {
+				return ErrInvalid
+			}
+			for name, day := range p.Daily {
+				found := false
+				for _, window := range p.Windows {
+					found = found || name == window
+				}
+				if !found {
+					return ErrInvalid
+				}
+				if _, err := time.Parse("2006-01-02 15:04", day); err != nil {
+					return ErrInvalid
+				}
+			}
 		}
 		if p := l.Reset; p != nil {
-			if (p.Phase != "prepared" && p.Phase != "sending" && p.Phase != "uncertain") || p.CreditID == "" || len(p.CreditID) > 512 || !redeemPattern.MatchString(p.RedeemRequestID) || p.ExpiresAt.IsZero() {
+			if (p.Phase != "prepared" && p.Phase != "sending" && p.Phase != "uncertain") || p.CreditID == "" || len(p.CreditID) > 512 || !redeemPattern.MatchString(p.RedeemRequestID) {
+				return ErrInvalid
+			}
+			if p.Purpose == "week" {
+				if p.WeekUntil.IsZero() {
+					return ErrInvalid
+				}
+			} else if (p.Purpose != "" && p.Purpose != "expiring") || p.ExpiresAt.IsZero() {
 				return ErrInvalid
 			}
 		}
