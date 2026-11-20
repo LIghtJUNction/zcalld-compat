@@ -208,6 +208,27 @@ credential, and changes refresh ownership without a network request. Other
 platforms retain external ownership until equivalent verification is available.
 
 
+## Codex response handling
+
+The Codex adapter requests the subscription endpoint's SSE format for both
+client modes. Streaming clients receive the original event bytes; nonstreaming
+clients receive the complete final response object, including tool output,
+usage, and extension fields.
+
+A successful response without a Content-Type is accepted only after a complete
+first Responses SSE event is validated within a 64 KiB probe. The adapter then
+sets text/event-stream and replays the buffered bytes without changing them.
+An explicit incompatible Content-Type, malformed first event, or exhausted
+probe limit rejects the response and cancels its body. The 64 KiB limit applies
+to first-event detection, not to the whole response or network traffic.
+[Focused mock tests](community/builtin/tests/codex-mime.test.mjs) cover fragmented
+UTF-8, BOM/CRLF framing, rejection, cancellation, and byte preservation.
+
+The subscription request adapter removes unsupported max_output_tokens and
+max_completion_tokens fields. Those fields do not provide a hard generation
+token cap for this provider. Gateway deadlines and response-byte limits still
+bound how long the local request is held and how much output it accepts.
+
 ## Community tools MCP
 
 The native zcalld community extension serves installed plugins' tool exports at

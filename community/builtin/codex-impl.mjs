@@ -118,6 +118,93 @@ export function prepare(body) {
   return result
 }
 
+// The subscription endpoint sometimes omits Content-Type while returning SSE.
+// Only its successful, untyped replies are probed. Validate a complete first
+// Responses event within 64 KiB, then replay every byte and retain backpressure.
+async function codexEventStream(response) {
+  const declared = (response.headers.get('content-type') ?? '').trim()
+  const media = declared.split(';', 1)[0].trim().toLowerCase()
+  if (media === 'text/event-stream') return response
+  if (declared || !response.body) {
+    await response.body?.cancel().catch(() => {})
+    throw new Error('Codex returned a non-SSE success response')
+  }
+  const reader = response.body.getReader()
+  const prefix = new Uint8Array(64 << 10)
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+  let used = 0, scanned = 0, lineStart = 0, skipLF = false, firstLine = true
+  let event = '', data = '', hasData = false, recognized = false, tail
+  const line = (bytes) => {
+    let text = decoder.decode(bytes)
+    if (firstLine) { firstLine = false; if (text.startsWith('\uFEFF')) text = text.slice(1) }
+    if (text === '') {
+      if (!hasData) { event = ''; return }
+      let value
+      try { value = object(JSON.parse(data)) } catch { throw new Error('Codex returned malformed SSE JSON') }
+      if (typeof value.type !== 'string' || !/^(?:response\.[a-z0-9_.]+|error)$/u.test(value.type) ||
+        (event && event !== value.type)) throw new Error('Codex returned a non-Responses SSE event')
+      recognized = true
+      return
+    }
+    if (text.startsWith(':')) return
+    const colon = text.indexOf(':')
+    const field = colon < 0 ? text : text.slice(0, colon)
+    let value = colon < 0 ? '' : text.slice(colon + 1)
+    if (value.startsWith(' ')) value = value.slice(1)
+    if (field === 'event') event = value
+    else if (field === 'data') { data += (hasData ? '\n' : '') + value; hasData = true }
+  }
+  try {
+    while (!recognized) {
+      const { value, done } = await reader.read()
+      if (done) throw new Error('Codex stream ended before a complete SSE event')
+      if (!(value instanceof Uint8Array)) throw new Error('Codex stream returned non-byte data')
+      const keep = Math.min(value.byteLength, prefix.length - used)
+      prefix.set(value.subarray(0, keep), used)
+      used += keep
+      while (scanned < used && !recognized) {
+        const at = scanned++, byte = prefix[at]
+        if (skipLF && byte === 10) { skipLF = false; lineStart = scanned; continue }
+        skipLF = false
+        if (byte === 10 || byte === 13) {
+          line(prefix.subarray(lineStart, at))
+          lineStart = scanned
+          skipLF = byte === 13
+        }
+      }
+      if (recognized) {
+        if (keep < value.byteLength) tail = value.subarray(keep)
+        break
+      }
+      if (used === prefix.length) throw new Error('Codex SSE prefix exceeds 64 KiB')
+    }
+    let first = prefix.subarray(0, used), ended = false
+    const replay = new ReadableStream({
+      async pull(controller) {
+        if (first) { controller.enqueue(first); first = undefined; return }
+        if (tail) { controller.enqueue(tail); tail = undefined; return }
+        try {
+          const { value, done } = await reader.read()
+          if (done) { ended = true; reader.releaseLock(); controller.close() }
+          else controller.enqueue(value)
+        } catch (error) {
+          ended = true; reader.releaseLock(); controller.error(error)
+        }
+      },
+      async cancel(reason) {
+        if (!ended) { ended = true; await reader.cancel(reason).catch(() => {}); reader.releaseLock() }
+      },
+    }, { highWaterMark: 0 })
+    const headers = new Headers(response.headers)
+    headers.set('content-type', 'text/event-stream')
+    return new Response(replay, { status: response.status, statusText: response.statusText, headers })
+  } catch (error) {
+    await reader.cancel().catch(() => {})
+    reader.releaseLock()
+    throw error
+  }
+}
+
 export async function collect(response) {
   for await (const event of sseEvents(response)) {
     if (event.data === '[DONE]') break
@@ -195,11 +282,9 @@ export function createCodex({ fetcher = globalThis.fetch, baseURL = CODEX_BASE, 
               headers.set('session-id', key); headers.set('thread-id', key)
             }
             const response = await fetchSafe(fetcher, `${base}/responses${asked.search}`, { ...init, headers, body: JSON.stringify(body) })
-            if (!response.ok || stream) return response
-            if (!(response.headers.get('content-type') ?? '').toLowerCase().startsWith('text/event-stream')) {
-              throw new Error('Codex returned a non-SSE success response')
-            }
-            return await collect(response)
+            if (!response.ok) return response
+            const events = await codexEventStream(response)
+            return stream ? events : await collect(events)
           },
         }
       },
