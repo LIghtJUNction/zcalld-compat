@@ -3901,6 +3901,8 @@ async function doMcpHttp(id, record, params) {
 // The management CLI keeps its existing partial-load diagnostics.
 let nativeStrictInit = false
 const handlers = {
+  // Native maintenance must confirm this host's shared strict init first.
+  nativeReady: () => null,
   gatewayStates() {
     return Object.fromEntries(gatewayHooks.map(({ spec, state }) => [spec, {
       calls: state.calls, failures: state.failures,
@@ -4191,7 +4193,8 @@ rl.on("line", (line) => {
   // sign-in, and a host whose stdin closed must not exit under it.
   const ctl = new AbortController()
   rpcInflight.set(msg.id, ctl)
-  wait
+  const waiting = msg.method === "nativeReady" ? bounded(wait, ctl.signal) : wait
+  waiting
     .then(() => fn(msg.params ?? {}, ctl.signal))
     .then(
       (result) => { if (!ctl.signal.aborted) send({ id: msg.id, result: result ?? null }) },
