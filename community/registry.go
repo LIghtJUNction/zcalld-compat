@@ -188,7 +188,7 @@ func Change(root, name, action, file string) (map[string]any, error) {
 			}
 		}
 		if p.Kind == "community" {
-			if e := ConfigureRuntime(root); e != nil {
+			if e := configureRuntimeHost(root); e != nil {
 				return nil, e
 			}
 		}

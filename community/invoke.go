@@ -106,7 +106,7 @@ func Verify(root, name string) (map[string]any, error) {
 	}
 	return map[string]any{"ok": true, "name": name, "sha256": sum}, nil
 }
-func ConfigureRuntime(root string) error {
+func configureRuntimeHost(root string) error {
 	host, pi, e := Scripts(root)
 	if e != nil {
 		return e

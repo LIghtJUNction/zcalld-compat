@@ -244,9 +244,21 @@ zcalld-pluginctl --root /absolute/extensions mcp disable
 zcalld-pluginctl --root /absolute/extensions import-mcp --source /absolute/magpie-config
 ```
 
-`runtime configure` writes the private host binding without starting plugins or
-refreshing accounts. Run it after upgrading this package, then restart the
-native gateway. `import-magpie` includes MCP state automatically; `import-mcp`
+`runtime configure` writes the private host binding and refreshes the paths and
+checksums of already registered, helper-owned builtin plugins to the current
+embedded bundle. It preserves account selections, enabled flags, plugin options,
+unknown registry fields, and community plugins. It does not add builtin entries,
+read Magpie state, start plugins, or refresh accounts. Run it after upgrading
+this package, then restart the native gateway; older bundles remain available
+to running workers.
+
+The registry is replaced atomically after the new bundle and host binding are
+prepared. These files are not one transaction: a later write failure can leave
+a new cache or host binding, while the existing registry remains intact. The
+[upgrade tests](community/runtime_test.go) cover selection, preserved state,
+idempotence, and validation failures.
+
+`import-magpie` includes MCP state automatically; `import-mcp`
 updates an existing staged registry. Only permission metadata is copied into the
 derived MCP map, never gateway credentials. Unknown or unsupported nonempty
 budgets are refused rather than relaxed. Tool grants, issuer intersections,
