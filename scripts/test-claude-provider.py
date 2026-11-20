@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import signal
 import socket
 import struct
@@ -83,6 +84,16 @@ class NativeClaudeProvider(unittest.TestCase):
             self.env[variable] = str(directory)
         self.empty_path = self.root / 'no-tools-on-path'
         self.empty_path.mkdir(mode=0o700)
+        if os.name == 'nt':
+            # Match the official archive's DLL set without restoring host tools.
+            dll_source = Path(os.environ.get('LIBCURL_DLL_DIR') or ARGS.binary.parent)
+            runtime_dlls = list(dll_source.glob('*.dll'))
+            self.assertTrue(any('curl' in path.name.lower() for path in runtime_dlls),
+                            'Windows fixture needs the official libcurl runtime DLL set')
+            for path in runtime_dlls:
+                self.assertTrue(path.is_file() and not path.is_symlink(),
+                                'Windows fixture runtime DLL must be a regular file')
+                shutil.copy2(path, self.empty_path / path.name)
         self.env['PATH'] = str(self.empty_path)  # A true no-Bun path.
         self.env['ZCALLD_PLUGINCTL'] = str(ARGS.pluginctl)
         self.env['ANTHROPIC_API_KEY'] = 'SYNTHETIC-MUST-NOT-REACH-CLI'
