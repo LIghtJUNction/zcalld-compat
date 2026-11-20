@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 var publicMethods = map[string]bool{
@@ -107,6 +109,14 @@ func Verify(root, name string) (map[string]any, error) {
 	return map[string]any{"ok": true, "name": name, "sha256": sum}, nil
 }
 func configureRuntimeHost(root string) error {
+	helper, e := os.Executable()
+	if e != nil {
+		return e
+	}
+	helper, e = filepath.EvalSymlinks(helper)
+	if e != nil || !filepath.IsAbs(helper) {
+		return errors.New("installed compatibility helper path is unavailable")
+	}
 	host, pi, e := Scripts(root)
 	if e != nil {
 		return e
@@ -115,7 +125,7 @@ func configureRuntimeHost(root string) error {
 	if e != nil {
 		return e
 	}
-	config := map[string]any{"bun": bun, "host": host, "pi": pi, "registry": root + "/registry.json", "auth_path": root + "/plugin-auth.json"}
+	config := map[string]any{"bun": bun, "host": host, "pi": pi, "registry": root + "/registry.json", "auth_path": root + "/plugin-auth.json", "pluginctl": helper}
 	b, _ := json.MarshalIndent(config, "", "  ")
 	return Atomic(root+"/host.json", b, 0600)
 }

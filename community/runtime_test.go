@@ -99,6 +99,18 @@ func TestRuntimeRefreshesOnlyOwnedBuiltinPathsAndPreservesState(t *testing.T) {
 	if !reflect.DeepEqual(after, runtimeJSON(t, before)) {
 		t.Fatal("runtime refresh changed unrelated registry state")
 	}
+	hostBytes, err := os.ReadFile(filepath.Join(root, "host.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper, err = filepath.EvalSymlinks(helper)
+	if err != nil || runtimeJSON(t, hostBytes)["pluginctl"] != helper {
+		t.Fatal("runtime binding did not pin the running helper")
+	}
 	gotAuth, _ := os.ReadFile(filepath.Join(root, "plugin-auth.json"))
 	if !bytes.Equal(gotAuth, auth) {
 		t.Fatal("runtime refresh changed account credentials")
