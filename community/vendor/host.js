@@ -309,6 +309,89 @@ for (const name of ["spawn", "spawnSync"]) {
 }
 
 let authPath = ""
+
+// Native account policy is loaded after accountKey has chosen the actual key.
+// The path comes only from init; request JSON and headers cannot supply policy.
+let registryPath = ""
+function readPolicyRegistry() {
+  let fd
+  try {
+    if (!path.isAbsolute(registryPath)) throw new Error("missing registry")
+    const parent = fs.lstatSync(path.dirname(registryPath))
+    const before = fs.lstatSync(registryPath)
+    const privateNode = (st) => process.platform === "win32" ||
+      ((st.mode & 0o077) === 0 && (!process.getuid || st.uid === process.getuid()))
+    if (!parent.isDirectory() || parent.isSymbolicLink() || !privateNode(parent) ||
+        !before.isFile() || before.isSymbolicLink() || !privateNode(before) ||
+        before.size <= 0 || before.size > 8 * 1024 * 1024) throw new Error("unsafe registry")
+    fd = fs.openSync(registryPath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0))
+    const opened = fs.fstatSync(fd)
+    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino ||
+        !privateNode(opened) || opened.size !== before.size) throw new Error("changed registry")
+    const bytes = Buffer.alloc(opened.size + 1)
+    let length = 0
+    while (length < bytes.length) {
+      const n = fs.readSync(fd, bytes, length, bytes.length - length, length)
+      if (!n) break
+      length += n
+    }
+    const after = fs.fstatSync(fd), named = fs.lstatSync(registryPath)
+    if (length !== opened.size || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs ||
+        named.isSymbolicLink() || named.dev !== opened.dev || named.ino !== opened.ino)
+      throw new Error("changed registry")
+    const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, length)))
+    if (!value || typeof value !== "object" || Array.isArray(value) || value.version !== 1)
+      throw new Error("invalid registry")
+    return value
+  } catch {
+    throw new Error("The private Codex account policy registry is unavailable or unsafe")
+  } finally { if (fd !== undefined) fs.closeSync(fd) }
+}
+function codexPolicyState(key) {
+  if (typeof key !== "string" || !key || key.length > 256 || providerOf(key) !== "builtin:codex")
+    throw new Error("Codex account policy requires the selected account")
+  const registry = readPolicyRegistry()
+  const meta = registry.accounts?.[key]
+  if (!Object.hasOwn(registry.accounts ?? {}, key) || meta?.enabled !== true)
+    throw new Error("The selected Codex account is unavailable or disabled")
+  const plugin = auths().get("builtin:codex")
+  const entries = Array.isArray(registry.plugins) ? registry.plugins.filter(entry =>
+    entry.kind === "community" && entry.enabled === true &&
+    entry.path === plugin?.target && entry.source === plugin?.spec) : []
+  if (entries.length !== 1) throw new Error("The selected Codex provider is unavailable or changed")
+  let restricted = false
+  if (Object.hasOwn(registry, "account_policies")) {
+    const policies = registry.account_policies
+    if (!policies || typeof policies !== "object" || Array.isArray(policies))
+      throw new Error("Invalid Codex account policy")
+    if (Object.hasOwn(policies, key)) {
+      const policy = policies[key]
+      if (!policy || typeof policy !== "object" || Array.isArray(policy) ||
+          Object.keys(policy).length !== 1 || typeof policy.codex_no_credits !== "boolean")
+        throw new Error("Codex policy requires an explicit no-credits boolean")
+      restricted = policy.codex_no_credits
+    }
+  }
+  const auth = readAuth()[key]
+  if (auth?.type !== "oauth") throw new Error("The selected Codex account is unavailable")
+  // Refresh can change access/refresh tokens without changing identity. Those
+  // credentials are neither copied into policy nor compared as policy state.
+  const identity = [auth.type, auth.accountId ?? auth.account_id ?? "",
+    auth.refreshOwner ?? "host", auth.sourceAuthFile ?? ""]
+  return { restricted, stamp: JSON.stringify([key, meta, entries[0], identity,
+    registry.account_defaults?.["builtin:codex"] ?? null, restricted]) }
+}
+function codexAccountPolicy(key) {
+  const frozen = codexPolicyState(key)
+  return Object.freeze({
+    codex_no_credits: frozen.restricted,
+    assertCurrent() {
+      if (codexPolicyState(key).stamp !== frozen.stamp)
+        throw new Error("Codex account or credit policy changed before generation; try again with the current configuration")
+    },
+  })
+}
+
 let modelsDevPath = ""
 let piPath = "" // pi.js, which loads pi's extensions
 let directory = process.cwd()
@@ -3548,6 +3631,7 @@ async function fetchAs(id, record, key, params) {
   // renewed it: a 401 is judged against it (staleAccess)
   const before = key ? readAuth()[key] : undefined
   try {
+    const accountPolicy = provider === "builtin:codex" ? codexAccountPolicy(key) : undefined
     const o = await options(provider, key)
     checkFetch(record)
     const h = new Headers()
@@ -3594,6 +3678,7 @@ async function fetchAs(id, record, key, params) {
       headers: h,
       body: bodyOf(body),
       signal: ctl.signal,
+      ...(accountPolicy ? { zcalldAccountPolicy: accountPolicy } : {}),
     })
     record.unconsumedBody = res.body
     checkFetch(record)
@@ -3718,6 +3803,7 @@ const handlers = {
   async init(p) {
     nativeStrictInit = p.nativeStrict === true
     authPath = p.authPath
+    registryPath = typeof p.registryPath === "string" ? p.registryPath : ""
     modelsDevPath = p.modelsDevPath ?? ""
     piPath = p.piPath ?? ""
     directory = p.directory ?? directory

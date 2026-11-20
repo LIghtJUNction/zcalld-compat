@@ -99,7 +99,7 @@ func startHost(root, source string, deadline time.Time) (*Host, error) {
 			items = append(items, map[string]any{"spec": p.Source, "target": p.Path, "options": p.Options, "gateway": p.Gateway})
 		}
 	}
-	params := map[string]any{"authPath": filepath.Join(root, "plugin-auth.json"), "piPath": pi, "directory": root, "plugins": items, "config": r.Config, "prefer": r.Prefer, "options": r.ProviderOptions, "modelsDevPath": r.ModelsDevPath}
+	params := map[string]any{"authPath": filepath.Join(root, "plugin-auth.json"), "registryPath": filepath.Join(root, "registry.json"), "piPath": pi, "directory": root, "plugins": items, "config": r.Config, "prefer": r.Prefer, "options": r.ProviderOptions, "modelsDevPath": r.ModelsDevPath}
 	var loaded struct {
 		Plugins []struct {
 			Error string `json:"error"`
