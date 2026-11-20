@@ -5,6 +5,8 @@ import hashlib
 import importlib.util
 import io
 from pathlib import Path
+import re
+import shlex
 import tarfile
 import tempfile
 import unittest
@@ -24,6 +26,22 @@ def info(version="0.1.5", pkgrel=1):
     return f"pkgbase = zcalld-compat\n\tpkgver = {version}\n\tpkgrel = {pkgrel}\n"
 
 class AURRevisionTests(unittest.TestCase):
+    def test_generated_recipes_have_matching_dependencies(self):
+        with tempfile.TemporaryDirectory() as temp:
+            out = Path(temp)
+            release.render_aur(out, release.version(), "a" * 64)
+            recipe = (out / "PKGBUILD").read_text()
+            match = re.search(r"^depends=\(([^)]*)\)$", recipe, re.MULTILINE)
+            self.assertIsNotNone(match)
+            recipe_dependencies = shlex.split(match.group(1))
+            index_dependencies = [
+                line.split("=", 1)[1].strip()
+                for line in (out / ".SRCINFO").read_text().splitlines()
+                if line.strip().startswith("depends =")
+            ]
+            self.assertIn("zcalld>=0.4.0", recipe_dependencies)
+            self.assertCountEqual(index_dependencies, recipe_dependencies)
+
     def test_revisions_cannot_downgrade_or_mutate_same_revision(self):
         with self.assertRaises(SystemExit):
             publisher.require_forward_revision(info(pkgrel=1), info(pkgrel=2), False)
