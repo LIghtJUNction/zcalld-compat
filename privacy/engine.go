@@ -22,10 +22,11 @@ import (
 const Limit = 16 << 20
 
 type Config struct {
-	Settings   string `json:"settings"`
-	Key        string `json:"key"`
-	ModelDir   string `json:"model_dir"`
-	HistoryDir string `json:"history_dir,omitempty"`
+	Settings     string `json:"settings"`
+	Key          string `json:"key"`
+	ModelDir     string `json:"model_dir"`
+	HistoryDir   string `json:"history_dir,omitempty"`
+	DesktopInbox string `json:"desktop_inbox,omitempty"`
 }
 type Settings struct {
 	Enabled *bool `json:"zcalldEnabled"`
@@ -92,7 +93,9 @@ func New(c Config) (*Engine, error) {
 	if !filepath.IsAbs(c.HistoryDir) {
 		return nil, errors.New("privacy history path must be absolute")
 	}
-	return &Engine{config: c, audit: newAuditStore(c.HistoryDir)}, nil
+	audit := newAuditStore(c.HistoryDir)
+	audit.desktopInbox = c.DesktopInbox
+	return &Engine{config: c, audit: audit}, nil
 }
 func readSettings(p string) (Settings, error) {
 	var s Settings

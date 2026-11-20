@@ -132,19 +132,21 @@ func (c checkedCount) add(d checkedCount) checkedCount {
 }
 
 type auditStore struct {
-	mu        sync.Mutex
-	dir       string
-	now       func() time.Time
-	every     time.Duration
-	lockWait  time.Duration
-	keepDays  int
-	keepBytes int64
-	pending   map[string]map[string]checkedCount
-	timer     *time.Timer
-	closed    bool
-	lastError error
-	pruned    time.Time
-	lastDir   os.FileInfo
+	mu            sync.Mutex
+	dir           string
+	now           func() time.Time
+	every         time.Duration
+	lockWait      time.Duration
+	keepDays      int
+	keepBytes     int64
+	pending       map[string]map[string]checkedCount
+	timer         *time.Timer
+	closed        bool
+	lastError     error
+	pruned        time.Time
+	lastDir       os.FileInfo
+	desktopInbox  string
+	firstVerified map[string]firstVerification
 }
 
 func newAuditStore(dir string) *auditStore {
@@ -169,9 +171,25 @@ func (a *auditStore) note(c Context, h auditHits, n int, blocked bool) error {
 		}
 		r := auditRecord{Time: now, What: what, Agent: c.Agent, Session: c.Session, N: n,
 			Values: h.values, Blocked: blocked, OmittedHits: h.omitted}
+		var event *firstEvent
+		var notificationErr error
 		if err := a.withLock(func(lock *os.File) error {
-			if err := a.append(lock, r); err != nil {
+			var first *firstIndex
+			if a.desktopInbox != "" {
+				if a.firstVerified == nil {
+					a.firstVerified = make(map[string]firstVerification)
+				}
+				first, notificationErr = prepareFirst(a.dir, a.firstVerified)
+			}
+			if err := a.append(lock, &r, a.desktopInbox != ""); err != nil {
 				return err
+			}
+			if first != nil && notificationErr == nil {
+				var counts map[string]int
+				counts, notificationErr = first.record(a.dir, r)
+				if notificationErr == nil {
+					event, notificationErr = makeFirstEvent(c.Agent, counts)
+				}
 			}
 			if a.pruned.IsZero() || now.Sub(a.pruned) >= time.Hour {
 				if err := a.prune(now); err != nil {
@@ -182,6 +200,8 @@ func (a *auditStore) note(c Context, h auditHits, n int, blocked bool) error {
 			return nil
 		}); err != nil {
 			a.lastError = errAudit
+		} else if notificationErr != nil || publishFirst(a.desktopInbox, event) != nil {
+			a.lastError = errFirst
 		}
 	}
 	day := now.Local().Format(auditDay)
@@ -353,7 +373,7 @@ func openAuditFile(path string, flags int) (*os.File, error) {
 	}
 	return f, nil
 }
-func (a *auditStore) append(lock *os.File, r auditRecord) error {
+func (a *auditStore) append(lock *os.File, r *auditRecord, durable bool) error {
 	var key [8]byte
 	n, err := lock.ReadAt(key[:], 0)
 	if err != nil && !(err == io.EOF && n == 0) {
@@ -404,8 +424,14 @@ func (a *auditStore) append(lock *os.File, r auditRecord) error {
 	}
 	data = append(data, '\n')
 	n, err = file.Write(data)
+	if err == nil && durable {
+		err = file.Sync()
+	}
 	closeErr := file.Close()
 	if err != nil || n != len(data) || closeErr != nil {
+		return errAudit
+	}
+	if durable && privatefile.SyncDir(a.dir) != nil {
 		return errAudit
 	}
 	return nil
