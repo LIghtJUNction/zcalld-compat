@@ -1,7 +1,7 @@
 // Optional one-shot maintenance. URLs, prompt and account selection are not RPC
 // inputs. The trusted host supplies the existing fetchAs path for generation.
 import { object, secret, expiry, fetchSafe } from './common.mjs'
-import { codexQuotaWindows } from './codex-credits.mjs'
+import { codexQuotaIdentity, codexQuotaWindows } from './codex-credits.mjs'
 
 const ORIGIN = 'https://chatgpt.com'
 const PATHS = Object.freeze({
@@ -114,12 +114,15 @@ export function createCodexMaintenance({ fetcher, externalAuth, accountID, clien
     const signal = AbortSignal.any(signals)
     if (signal.aborted) throw abort(signal)
     let auth = object(stored)
+    const ownership = value => JSON.stringify([value.type, value.refreshOwner ?? null, value.sourceAuthFile ?? null])
+    const initialOwnership = ownership(auth)
     trusted.assertCurrent()
     if (auth.type !== 'oauth' || !['external', 'host', undefined].includes(auth.refreshOwner)) throw failure()
     if (auth.refreshOwner === 'external') auth = await bounded(externalAuth(auth, now()), signal)
     const expires = expiry(auth.access, 0, now()) || Number(auth.expires)
     if (!Number.isFinite(expires) || expires <= now()) throw failure()
     const actualAccount = secret(accountID(auth), 'bound Codex account')
+    const initialIdentity = codexQuotaIdentity(auth, actualAccount)
     const headers = new Headers({ accept: 'application/json', authorization: `Bearer ${secret(auth.access, 'Codex access token')}`,
       'chatgpt-account-id': actualAccount })
     clientHeaders(headers, '0.170.0')
@@ -198,7 +201,24 @@ export function createCodexMaintenance({ fetcher, externalAuth, accountID, clien
     const card = candidates[0]
     if (!card || card.id !== request.credit_id || card.expires_at !== expected || !eligible(snapshot, card, request.lead_minutes, now()) || signal.aborted)
       return { status: 'not_sent', code: 'card_changed' }
-    trusted.assertCurrent()
+    // Inspection can overlap a native sign-in change, access-token renewal or
+    // an explicit credential-owner handoff. Re-read local authority at the last
+    // boundary before spending this exact card; never fall back to the copy
+    // captured before the usage/cards requests.
+    try {
+      trusted.assertCurrent()
+      if (typeof trusted.readAuth !== 'function') throw failure()
+      const latestStored = object(await bounded(Promise.resolve().then(() => trusted.readAuth()), signal))
+      if (ownership(latestStored) !== initialOwnership) throw failure()
+      const latest = latestStored.refreshOwner === 'external'
+        ? await bounded(externalAuth(latestStored, now()), signal) : latestStored
+      const latestAccount = secret(accountID(latest), 'bound Codex account')
+      const latestExpires = expiry(latest.access, 0, now()) || Number(latest.expires)
+      if (!Number.isFinite(latestExpires) || latestExpires <= now() ||
+          codexQuotaIdentity(latest, latestAccount) !== initialIdentity) throw failure()
+      trusted.assertCurrent()
+      if (signal.aborted) throw abort(signal)
+    } catch { return { status: 'not_sent', code: 'credentials_changed' } }
     let response
     try {
       const postHeaders = new Headers(headers); postHeaders.set('content-type', 'application/json')
