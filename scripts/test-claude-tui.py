@@ -303,8 +303,8 @@ class NativeClaudeTUI(unittest.TestCase):
         if os.name == "nt":
             # Hold the exact process handle before its sign-in screen can make
             # the helper stop it; opening a PID after that cleanup can race exit.
-            with (self.config / "native-launch.ack").open("x", encoding="ascii") as ack:
-                ack.write(f"{child.pid}\n")
+            with (self.config / "native-launch.ack").open("xb") as ack:
+                ack.write(f"{child.pid}\n".encode("ascii"))
         self.assertNotEqual(proc.wait(timeout=10), 0)
         child.wait_exited()
         launch = json.loads((self.config / "native-launch.json").read_text(encoding="utf-8"))
