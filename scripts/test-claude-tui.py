@@ -41,7 +41,9 @@ class OwnedChild:
             self.kernel.CloseHandle.restype = ctypes.c_int
             self.handle = self.kernel.OpenProcess(0x00100000, 0, pid)
             if not self.handle:
-                raise AssertionError("cannot retain the synthetic child process identity")
+                raise AssertionError(
+                    "cannot retain the synthetic child process identity "
+                    f"(Win32 error {ctypes.get_last_error()})")
 
     def wait_exited(self, timeout=5):
         if self.handle:
@@ -292,9 +294,17 @@ class NativeClaudeTUI(unittest.TestCase):
         self.assertLess(time.monotonic(), caller_deadline - 4)
 
     def test_signin_failure_never_switches_to_print(self):
-        proc, messages = self.start(extra_env={"FAKE_LOGIN": "1"})
+        extra_env = {"FAKE_LOGIN": "1"}
+        if os.name == "nt":
+            extra_env["ZCALLD_TUI_NATIVE_LAUNCH_ACK"] = "1"
+        proc, messages = self.start(extra_env=extra_env)
         self.send_hi(proc)
         _, child = self.launch()
+        if os.name == "nt":
+            # Hold the exact process handle before its sign-in screen can make
+            # the helper stop it; opening a PID after that cleanup can race exit.
+            with (self.config / "native-launch.ack").open("x", encoding="ascii") as ack:
+                ack.write(f"{child.pid}\n")
         self.assertNotEqual(proc.wait(timeout=10), 0)
         child.wait_exited()
         launch = json.loads((self.config / "native-launch.json").read_text(encoding="utf-8"))

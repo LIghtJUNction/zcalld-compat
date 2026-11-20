@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
+	"time"
 )
 
 // nativeProbe only runs in the compiled synthetic Claude test executable.
@@ -36,6 +38,30 @@ func nativeProbe() {
 	})
 	if err != nil || os.WriteFile(filepath.Join(cfg, "native-launch.json"), b, 0o600) != nil {
 		os.Exit(91)
+	}
+	if os.Getenv("ZCALLD_TUI_NATIVE_LAUNCH_ACK") == "1" {
+		// The Windows sign-in fixture retains a process handle before allowing
+		// the screen that makes the helper stop this child. Use the existing
+		// ten-second launch bound; this opt-in lives only in the test executable.
+		deadline := time.NewTimer(10 * time.Second)
+		defer deadline.Stop()
+		tick := time.NewTicker(10 * time.Millisecond)
+		defer tick.Stop()
+		want := strconv.Itoa(os.Getpid()) + "\n"
+		for {
+			ack, err := os.ReadFile(filepath.Join(cfg, "native-launch.ack"))
+			if err == nil && string(ack) == want {
+				break
+			}
+			if err != nil && !os.IsNotExist(err) {
+				os.Exit(92)
+			}
+			select {
+			case <-deadline.C:
+				os.Exit(93)
+			case <-tick.C:
+			}
+		}
 	}
 	// The upstream fake reads only this explicit variable. Record its original
 	// absence first so the native-layout assertion cannot be masked by this shim.
