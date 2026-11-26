@@ -141,6 +141,8 @@ killed worker can lose counter increments still within the five-second window.
 
 `invoke PROVIDER EVENT --input-file /absolute/request.json` calls an allowlisted public host method. Raw authentication exporters and loader results are unavailable through this command. Public results remove credential fields.
 
+Use `provider-market` to list packages from Magpie’s provider registry. Pass a listed package to `provider-market PACKAGE` to resolve an exact npm version or an integrity-pinned Magpie distribution source for the normal install and enable operations. Distribution installation verifies the tarball’s SHA-512 checksum before Bun processes it with lifecycle scripts disabled.
+
 OAuth callbacks must run in the same host as authorization. `session` keeps that host alive and accepts JSON lines with `id`, `method`, and `params` on stdin, returning a corresponding sanitized result. It supports authorization, callback, prompts, validation, usage, check-in, account checks, tools, and search. End stdin to stop that helper and its host.
 
 ## Validation scope

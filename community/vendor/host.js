@@ -3951,6 +3951,15 @@ const handlers = {
   cliInstalled,
   installCli,
   load,
+  async providerEndpoint(p) {
+    const { baseURL } = await load(p)
+    if (!baseURL) return { baseURL: "" }
+    const url = new URL(baseURL)
+    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
+      return { baseURL: "" }
+    }
+    return { baseURL }
+  },
   usage,
   "codex.usage": (p, signal) => codexUsageOf(p, signal),
   "maintenance.inspect": (p, signal) => maintenanceOf("inspect", p, signal),

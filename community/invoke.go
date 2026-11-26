@@ -11,7 +11,7 @@ import (
 )
 
 var publicMethods = map[string]bool{
-	"providers": true, "prompt": true, "validate": true, "authorize": true, "callback": true,
+	"providers": true, "providerEndpoint": true, "prompt": true, "validate": true, "authorize": true, "callback": true,
 	"apiKey": true, "importFiles": true, "usage": true, "checkin": true, "check": true, "keepSignedIn": true,
 	"tool": true, "search": true, "calls": true, "gatewayStates": true, "setProviderOptions": true,
 }
@@ -42,7 +42,7 @@ func Invoke(root, provider, event, file string) (map[string]any, error) {
 	if e = h.Call(event, params, &result); e != nil {
 		return nil, e
 	}
-	strip(result)
+	publicResult(event, result)
 	return map[string]any{"ok": true, "result": result}, nil
 }
 
@@ -75,7 +75,7 @@ func Session(root string, in io.Reader, out io.Writer) error {
 				if e = h.Call(r.Method, r.Params, &result); e != nil {
 					answer["error"] = "community operation failed"
 				} else {
-					strip(result)
+					publicResult(r.Method, result)
 					answer["result"] = result
 				}
 			}
@@ -86,6 +86,37 @@ func Session(root string, in io.Reader, out io.Writer) error {
 	}
 	return scan.Err()
 }
+
+// A prompt key identifies a field. Only preserve it at the schema-defined
+// prompt location, so a plugin cannot expose a credential-shaped "key" in
+// any other public result through this exception.
+func publicResult(method string, result any) {
+	if method != "prompt" {
+		strip(result)
+		return
+	}
+	reply, _ := result.(map[string]any)
+	prompt, _ := reply["prompt"].(map[string]any)
+	if key, ok := prompt["key"].(string); ok && key != "" && len(key) <= 256 {
+		prompt["field"] = key
+	}
+	raw, _ := prompt["options"].([]any)
+	choices := make([]map[string]string, 0, min(len(raw), 256))
+	for _, item := range raw[:min(len(raw), 256)] {
+		option, _ := item.(map[string]any)
+		label, _ := option["label"].(string)
+		value, ok := option["value"].(string)
+		if !ok || len(label) > 512 || len(value) > 512 {
+			continue
+		}
+		choices = append(choices, map[string]string{"label": label, "value": value})
+	}
+	strip(result)
+	if prompt["type"] == "select" {
+		prompt["options"] = choices
+	}
+}
+
 func Verify(root, name string) (map[string]any, error) {
 	r, e := Read(root)
 	if e != nil {

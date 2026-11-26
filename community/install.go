@@ -151,6 +151,14 @@ func Install(root string, o InstallOptions) (map[string]any, error) {
 	target := stage
 	revision := ""
 	switch {
+	case strings.HasPrefix(source, "magpie:"):
+		if o.Version != "" {
+			return nil, errors.New("resolve the exact Magpie distribution source before changing versions")
+		}
+		target, e = installMagpiePackage(stage, source)
+		if e != nil {
+			return nil, e
+		}
 	case strings.HasPrefix(source, "npm:"):
 		spec := strings.TrimPrefix(source, "npm:")
 		if o.Version != "" {
@@ -237,7 +245,7 @@ func Install(root string, o InstallOptions) (map[string]any, error) {
 			}
 		}
 	}
-	if kind == "community" && !strings.HasPrefix(source, "npm:") {
+	if kind == "community" && !strings.HasPrefix(source, "npm:") && !strings.HasPrefix(source, "magpie:") {
 		if _, e := os.Stat(filepath.Join(target, "package.json")); e == nil {
 			args := []string{"bun", "install", "--ignore-scripts", "--no-progress"}
 			if _, e := os.Stat(filepath.Join(target, "bun.lock")); e == nil {

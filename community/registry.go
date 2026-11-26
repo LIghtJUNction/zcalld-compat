@@ -289,6 +289,10 @@ func fileHash(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 func baseName(source string) string {
+	if source, ok := strings.CutPrefix(source, "magpie:"); ok {
+		spec, _, _ := strings.Cut(source, "#")
+		return filepath.Base(npmName(spec))
+	}
 	s := strings.TrimSuffix(source, ".git")
 	s = strings.TrimSuffix(s, ".so")
 	s = strings.TrimPrefix(s, "npm:")

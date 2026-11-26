@@ -217,6 +217,15 @@ func run(args []string) error {
 		result, err = community.Change(root, positional[1], positional[0], file)
 	case "providers":
 		result, err = community.Providers(root)
+	case "provider-market":
+		if len(positional) > 2 {
+			return errors.New("provider-market accepts at most one package")
+		}
+		pkg := ""
+		if len(positional) == 2 {
+			pkg = positional[1]
+		}
+		result, err = community.ProviderMarket(pkg)
 	case "runtime":
 		if len(positional) == 2 && positional[1] == "configure" {
 			err = community.ConfigureRuntime(root)
