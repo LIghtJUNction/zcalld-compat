@@ -284,7 +284,7 @@ func Install(root string, o InstallOptions) (map[string]any, error) {
 	if gatewayRelative != "" {
 		gateway = filepath.Join(generation, gatewayRelative)
 	}
-	entry := Entry{Name: o.Name, Path: target, Kind: kind, Version: version, Source: source, Revision: revision, SHA256: hash, Gateway: gateway}
+	entry := Entry{Name: o.Name, Path: target, Kind: kind, Enabled: true, Version: version, Source: source, Revision: revision, SHA256: hash, Gateway: gateway}
 	if old >= 0 {
 		entry.Enabled = r.Plugins[old].Enabled
 		entry.Options = r.Plugins[old].Options
@@ -292,6 +292,12 @@ func Install(root string, o InstallOptions) (map[string]any, error) {
 		r.Plugins[old] = entry
 	} else {
 		r.Plugins = append(r.Plugins, entry)
+	}
+	if old < 0 && kind == "community" {
+		if e = configureRuntimeHost(root); e != nil {
+			os.RemoveAll(generation)
+			return nil, e
+		}
 	}
 	if e = Save(root, r); e != nil {
 		os.RemoveAll(generation)

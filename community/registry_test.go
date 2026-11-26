@@ -18,8 +18,8 @@ func TestLocalLifecycleAndPrivateOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	plugin := result["plugin"].(map[string]any)
-	if plugin["enabled"] != false || plugin["kind"] != "community" {
-		t.Fatal("new code was enabled without an explicit action")
+	if plugin["enabled"] != true || plugin["kind"] != "community" {
+		t.Fatal("new plugin was not enabled by installation")
 	}
 	old := plugin["path"].(string)
 	if strings.Contains(old, ".stage-") {
@@ -45,6 +45,9 @@ func TestLocalLifecycleAndPrivateOptions(t *testing.T) {
 	result, err = Install(root, InstallOptions{Name: "fixture", Update: true})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if result["plugin"].(map[string]any)["enabled"] != false {
+		t.Fatal("update enabled a disabled plugin")
 	}
 	if result["plugin"].(map[string]any)["path"] == old {
 		t.Fatal("update overwrote an active generation")
