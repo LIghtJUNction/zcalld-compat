@@ -12,7 +12,7 @@ import (
 
 var publicMethods = map[string]bool{
 	"providers": true, "providerEndpoint": true, "prompt": true, "validate": true, "authorize": true, "callback": true,
-	"apiKey": true, "importFiles": true, "usage": true, "checkin": true, "check": true, "keepSignedIn": true,
+	"modelCatalog": true, "apiKey": true, "importFiles": true, "usage": true, "checkin": true, "check": true, "keepSignedIn": true,
 	"tool": true, "search": true, "calls": true, "gatewayStates": true, "setProviderOptions": true,
 }
 

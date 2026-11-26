@@ -3977,6 +3977,19 @@ const handlers = {
     infoGen++
     return null
   },
+  async modelCatalog(p, signal) {
+    const key = accountKey(p.provider, p.account)
+    const stored = authCopy(key)
+    if (!stored || (p.account && key !== p.account)) return { status: "missing" }
+    try {
+      const catalog = await info(p.provider, key, true, 15000, false, signal)
+      if (!catalog.fellBack) return { models: Object.keys(catalog.models).sort() }
+    } catch {
+      // A plugin error can include private data. Only return fixed status codes.
+    }
+    const current = authCopy(key)
+    return { status: refusedLists.has(key) || (current?.type === "oauth" && current.expires > 0 && current.expires <= Date.now()) ? "expired" : "unavailable" }
+  },
   // check tries one account as a request would: its loader, then its
   // models as the plugin lists them for it, then its usage, which asks the
   // vendor of the account itself. refused is the models hook saying the
